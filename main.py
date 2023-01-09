@@ -1,17 +1,19 @@
 from machine import Pin, I2C, ADC
-from time import sleep
+from time import sleep, ticks_us, ticks_diff
 
-i2c = I2C(sda=Pin(18), scl=Pin(19), id=1)
+i2c = I2C(sda=Pin(18), scl=Pin(19), id=1, freq=400000)
 print(i2c.scan())
 
 a = ADC(Pin(28))
 print(a.read_u16())
 
 int_p = Pin(20, Pin.IN, Pin.PULL_UP)
-int = int_p.value
+int_g = int_p.value
 
 def get_adc_vbus():
     return (3.3*11*a.read_u16())/65536
+
+print(get_adc_vbus(), "V")
 
 def reset():
     # reset the entire FUSB
@@ -40,7 +42,7 @@ def read_cc(cc):
     x &= clear_mask
     mask = 0b1000 if cc == 2 else 0b100
     x |= mask
-    print('rc', bin(x1), bin(x), cc)
+    #print('rc', bin(x1), bin(x), cc)
     i2c.writeto_mem(0x22, 0x02, bytes((x,)) )
 
 def measure():
@@ -52,7 +54,7 @@ def measure():
     sleep(0.001)
     cc2_c = cc_current()
     cc = [1, 2][cc1_c < cc2_c]
-    print('m', bin(cc1_c), bin(cc2_c), cc)
+    #print('m', bin(cc1_c), bin(cc2_c), cc)
     if cc1_c == cc2_c:
         return 0
     return cc
@@ -85,7 +87,7 @@ def enable_tx(cc):
     x &= 0b11111100 # clearing both TX bits
     x |= mask
     x |= 0b100
-    print('et', bin(x1), bin(x), cc)
+    #print('et', bin(x1), bin(x), cc)
     i2c.writeto_mem(0x22, 0x03, bytes((x,)) )
 
 def power():
@@ -168,14 +170,63 @@ def find_cc():
     read_cc(cc)
     flush_transmit()
     flush_receive()
+    #import gc; gc.collect()
     reset_pd()
     return cc
 
+pdo_requested = False
+pdos = []
+timing_start = 0
+timing_end = 0
+
 def wait():
+  global pdo_requested, pdos #, timing
   while True:
-    s = i2c.readfrom_mem(0x22, 0x3c, 7)
-    print(s, rxb_state())
-    sleep(0.5)
+    #s = i2c.readfrom_mem(0x22, 0x3c, 7)
+    #print(s, rxb_state())
+    if rxb_state()[0] == 0:
+      if not pdo_requested:
+        pdos = read_pdos()
+        #sleep(0.01)
+        pdo_i, current = select_pdo(pdos)
+        request_pdo(pdo_i, current, current)
+        print("PDO requested!")
+        pdo_requested = True
+
+def select_pdo(pdos):
+    power_levels = []
+    currents = []
+    # finding a PDO with maximum extractable power
+    resistance = 8
+    for pdo in pdos:
+        if pdo[0] != 'fixed':
+            # skipping variable PDOs for now
+            power_levels.append(0) # keeping indices in sync
+            currents.append(0)
+            continue
+        t, voltage, max_current, oc, flags = pdo
+        voltage = voltage // 1000
+        max_current = max_current // 1000
+        # calculating the power needed
+        current = voltage / resistance
+        if current > max_current:
+            # overcurrent, skipping
+            power_levels.append(0) # keeping indices in sync
+            currents.append(0)
+            continue
+        power = voltage * current
+        power_levels.append(power)
+        currents.append(int(current)*1000)
+    # finding the maximum power level
+    i = power_levels.index(max(power_levels))
+    return i, currents[i]
+
+def time_pdos():
+    global timing_start, timing_end
+    timing_start = ticks_us()
+    pdos = read_pdos()
+    timing_end = ticks_us()
+    print(ticks_diff(timing_end, timing_start))
 
 t_33 = b'\xe0\xa1a,\x91\x01\x08,\xd1\x02\x00\x13\xc1\x03\x00\xdc\xb0\x04\x00\xa5@\x06\x00<!\xdc\xc0H\xc6\xe7\xc6\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
 t_fr = b'\xe0\xa1Q,\x91\x01\x08,\xd1\x02\x00,\xb1\x04\x00,A\x06\x00<!\xa4\xc9\xf5\x9b\x8bU\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
@@ -240,19 +291,19 @@ def read_pdos():
     header = get_rxb(1)[0]
     assert(header == 0xe0)
     b1, b0 = get_rxb(2)
-    print(hex(b1), hex(b0))
+    #print(hex(b1), hex(b0))
     pdo_count = (b0 >> 4) & 0b111
     read_len = pdo_count*4
     pdos = get_rxb(read_len)
-    crc = get_rxb(4)
+    _ = get_rxb(4) # crc
     for pdo_i in range(pdo_count):
         pdo_bytes = pdos[(pdo_i*4):][:4]
-        print(myhex(pdo_bytes))
+        #print(myhex(pdo_bytes))
         parsed_pdo = parse_pdo(pdo_bytes)
         pdo_list.append(parsed_pdo)
     return pdo_list
 
-def request_pdo(num, current, max_current):
+def request_pdo(num, current, max_current, msg_id=0):
     sop_seq = [0x12, 0x12, 0x12, 0x13, 0x80]
     eop_seq = [0xff, 0x14, 0xfe, 0xa1]
     obj_count = 1
@@ -277,13 +328,14 @@ def request_pdo(num, current, max_current):
     pdo[4] |= current_h
 
     pdo[5] |= (num+1) << 4 # object position
+    pdo[5] |= (msg_id) << 1 # message ID
     pdo[5] |= 0b1 # no suspend
 
     sop_seq[4] |= pdo_len
 
-    print(myhex(sop_seq))
-    print(myhex(pdo))
-    print(myhex(eop_seq))
+    #print(myhex(sop_seq))
+    #print(myhex(pdo))
+    #print(myhex(eop_seq))
 
     i2c.writeto_mem(0x22, 0x43, bytes(sop_seq) )
     i2c.writeto_mem(0x22, 0x43, bytes(pdo) )
@@ -291,5 +343,4 @@ def request_pdo(num, current, max_current):
 
 
 cc = find_cc()
-sleep(0)
 wait()
