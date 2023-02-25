@@ -1,5 +1,6 @@
 from machine import Pin, I2C, ADC
 from time import sleep, ticks_us, ticks_diff
+import sys
 
 i2c = I2C(sda=Pin(18), scl=Pin(19), id=1, freq=400000)
 print(i2c.scan())
@@ -43,6 +44,19 @@ def read_cc(cc):
     mask = 0b1000 if cc == 2 else 0b100
     x |= mask
     #print('rc', bin(x1), bin(x), cc)
+    i2c.writeto_mem(0x22, 0x02, bytes((x,)) )
+
+def enable_sop():
+    # enable reception of SOP'/SOP" messages
+    x = i2c.readfrom_mem(0x22, 0x07, 1)[0]
+    mask = 0b11
+    x |= mask
+    i2c.writeto_mem(0x22, 0x07, bytes((x,)) )
+
+def disable_pulldowns():
+    x = i2c.readfrom_mem(0x22, 0x02, 1)[0]
+    clear_mask = ~0b11 & 0xFF
+    x &= clear_mask
     i2c.writeto_mem(0x22, 0x02, bytes((x,)) )
 
 def measure():
@@ -111,12 +125,20 @@ def clear_interrupts():
     i2c.writeto_mem(0x22, 0x3e, bytes([0]))
     i2c.writeto_mem(0x22, 0x42, bytes([0]))
 
+# this is a way better way to do things than the following function -
+# the read loop should be ported to this function, and the next ome deleted
+def rxb_state():
+    # get read buffer interrupt states - (rx buffer empty, rx buffer full)
+    st = i2c.readfrom_mem(0x22, 0x41, 1)[0]
+    return ((st & 0b100000) >> 5, (st & 0b10000) >> 4)
+
+# TODO: yeet
 def rxb_state():
     st = i2c.readfrom_mem(0x22, 0x41, 1)[0]
     return ((st & 0b110000) >> 4, (st & 0b11000000) >> 6)
 
 def get_rxb(l=80):
-    # show measured CC level interpreted as USB-C current levels
+    # read from FIFO
     return i2c.readfrom_mem(0x22, 0x43, l)
 
 def hard_reset():
@@ -193,32 +215,40 @@ def wait():
         print("PDO requested!")
         pdo_requested = True
 
+def wait_listen():
+  while True:
+    if rxb_state()[0] == 0:
+        print(get_buffer())
+
 def select_pdo(pdos):
+    # finding a PDO with maximum extractable power
+    # for a given static resistance,
+    # while making sure that we don't overcurrent the PSU
+    resistance = 8
+    # calculation storage lists
     power_levels = []
     currents = []
-    # finding a PDO with maximum extractable power
-    resistance = 8
     for pdo in pdos:
-        if pdo[0] != 'fixed':
-            # skipping variable PDOs for now
-            power_levels.append(0) # keeping indices in sync
-            currents.append(0)
+        if pdo[0] != 'fixed': # skipping variable PDOs for now
+            # keeping indices in sync
+            power_levels.append(0); currents.append(0)
             continue
         t, voltage, max_current, oc, flags = pdo
-        voltage = voltage // 1000
-        max_current = max_current // 1000
+        voltage = voltage / 1000
+        max_current = max_current / 1000
         # calculating the power needed
         current = voltage / resistance
-        if current > max_current:
-            # overcurrent, skipping
-            power_levels.append(0) # keeping indices in sync
-            currents.append(0)
+        current = current * 1.10 # adding 10% leeway
+        if current > max_current: # current too high, skipping
+            # keeping indices in sync
+            power_levels.append(0); currents.append(0)
             continue
         power = voltage * current
         power_levels.append(power)
-        currents.append(int(current)*1000)
+        currents.append(int(current*1000))
     # finding the maximum power level
     i = power_levels.index(max(power_levels))
+    # returning the PDO index + current we'd need
     return i, currents[i]
 
 def time_pdos():
@@ -303,6 +333,63 @@ def read_pdos():
         pdo_list.append(parsed_pdo)
     return pdo_list
 
+message_types = [
+    "Reserved",
+    "GoodCRC",
+    "GotoMin",
+    "Accept",
+    "Reject",
+    "Ping",
+    "PS_RDY",
+    "Get_Source_Cap",
+    "Get_Sink_Cap",
+    "DR_Swap",
+    "PR_Swap",
+    "VCONN_Swap",
+    "Wait",
+    "Soft_Reset",
+    "Data_Reset",
+    "Data_Reset_Complete",
+    "Not_Supported",
+    "Get_Source_Cap_Extended",
+    "Get_Status",
+    "FR_Swap",
+    "Get_PPS_Status",
+    "Get_Country_Codes",
+    "Get_Sink_Cap_Extended",
+    "Get_Source_Info",
+    "Get_Revision",
+]
+
+def get_buffer():
+    header = 0
+    # we might to get through some message data!
+    while header != 0xe0:
+        header = get_rxb(1)[0]
+        if header == 0:
+            return
+        if header != 0xe0:
+            # this will be printed, eventually.
+            # the aim is that it doesn't delay code in the way that print() seems to
+            sys.stdout.write("disc {}\n".format(hex(header)))
+    b1, b0 = get_rxb(2)
+    # parsing the packet header
+    msg_type = b1 & 0b11111
+    msg_type_str = message_types[msg_type] if msg_type < len(message_types) else "Reserved"
+    print("t", msg_type_str, "({})".format(bin(msg_type))) # message type
+    print("r", bin(b1 >> 6)) # revision
+    print("i", bin((b0 >> 1) & 0b111)) # message index
+    pdo_count = (b0 >> 4) & 0b111
+    print("n", pdo_count) # number of PDOs
+    print("e", bin(b0 >> 7)) # extended
+    if pdo_count:
+        read_len = pdo_count*4
+        pdos = get_rxb(read_len)
+    _ = get_rxb(4) # crc
+    if pdo_count:
+        return bin(b0), bin(b1), pdos
+    return bin(b0), bin(b1)
+
 def request_pdo(num, current, max_current, msg_id=0):
     sop_seq = [0x12, 0x12, 0x12, 0x13, 0x80]
     eop_seq = [0xff, 0x14, 0xfe, 0xa1]
@@ -341,6 +428,27 @@ def request_pdo(num, current, max_current, msg_id=0):
     i2c.writeto_mem(0x22, 0x43, bytes(pdo) )
     i2c.writeto_mem(0x22, 0x43, bytes(eop_seq) )
 
+listen = 0
 
-cc = find_cc()
-wait()
+# this construct allows you to switch from sink mode to listen mode
+# it likely does not let you switch into other direction hehe ouch
+# it might not be needed anymore either lol
+# but hey
+# TODO I guess
+
+def loop():
+    if listen:
+        cc = 1
+        flush_receive()
+        disable_pulldowns()
+        read_cc(cc)
+        enable_sop()
+        flush_transmit()
+        flush_receive()
+        reset_pd()
+        wait_listen()
+    else:
+        cc = find_cc()
+        wait()
+
+loop()
