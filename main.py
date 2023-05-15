@@ -222,7 +222,10 @@ def wait():
 def wait_listen():
   while True:
     if rxb_state()[0] == 0:
-        print(get_buffer())
+        print(get_buffer_fast())
+        #print(get_rxb(80))
+        #print(get_buffer())
+    sleep(0.001)
 
 def select_pdo(pdos):
     # finding a PDO with maximum extractable power
@@ -337,7 +340,7 @@ def read_pdos():
         pdo_list.append(parsed_pdo)
     return pdo_list
 
-message_types = [
+control_message_types = [
     "Reserved",
     "GoodCRC",
     "GotoMin",
@@ -365,34 +368,132 @@ message_types = [
     "Get_Revision",
 ]
 
-def get_buffer():
+data_message_types = [
+    "Reserved",
+    "Source_Capabilities",
+    "Request",
+    "BIST",
+    "Sink_Capabilities",
+    "Battery_Status",
+    "Alert",
+    "Get_Country_Info",
+    "Enter_USB",
+    "EPR_Request",
+    "EPR_Mode",
+    "Source_Info",
+    "Revision",
+    "Reserved",
+    "Reserved",
+    "Vendor_Defined",
+]
+
+packets = []
+packets_pos = [ 0,0 ] # hoot-hoot,,, hewwo ;-P
+
+def get_buffer_fast():
+    packet = []
+    while rxb_state()[0] == 0:
+        packet.append(get_rxb(1)[0])
+    packets.append(packet)
+    return packet
+
+header_starts = [0xe0, 0xc0]
+
+def get_buffer(get_rxb=get_rxb):
     header = 0
     # we might to get through some message data!
-    while header != 0xe0:
+    while header not in header_starts:
         header = get_rxb(1)[0]
         if header == 0:
             return
-        if header != 0xe0:
+        if header not in header_starts:
             # this will be printed, eventually.
             # the aim is that it doesn't delay code in the way that print() seems to
             sys.stdout.write("disc {}\n".format(hex(header)))
     b1, b0 = get_rxb(2)
+    sop = 1 if header == 0xe0 else 0
+    sop_str = "" if sop else "'"
     # parsing the packet header
+    prole = b0 & 1
+    prole_str = "NC"[prole] if sop else "R"
+    drole = b1 >> 5 & 1
+    drole_str = "UD"[drole] if sop else "R"
     msg_type = b1 & 0b11111
-    msg_type_str = message_types[msg_type] if msg_type < len(message_types) else "Reserved"
-    print("t", msg_type_str, "({})".format(bin(msg_type))) # message type
-    print("r", bin(b1 >> 6)) # revision
-    print("i", bin((b0 >> 1) & 0b111)) # message index
     pdo_count = (b0 >> 4) & 0b111
-    print("n", pdo_count) # number of PDOs
-    print("e", bin(b0 >> 7)) # extended
+    if pdo_count == 0:
+        message_types = control_message_types
+    else:
+        message_types = data_message_types
+    msg_index = int((b0 >> 1) & 0b111)
+    msg_type_str = message_types[msg_type] if msg_type < len(message_types) else "Reserved"
     if pdo_count:
         read_len = pdo_count*4
         pdos = get_rxb(read_len)
     _ = get_rxb(4) # crc
+    rev = b1 >> 6
+    rev_str = "123"[rev]
+    is_ext = b0 >> 7 # extended
+    ext_str = ["std", "ext"][is_ext]
+    if msg_type_str == "GoodCRC":
+        print("{}: {}".format(msg_index, msg_type_str))
+    else:
+        if pdo_count:
+            # converting "41 80 00 FF A4 25 00 2C" to "FF008041 2C0025A4"
+            pdo_strs = []
+            pdo_data = myhex(pdos).split(' ')
+            for i in range(len(pdo_data)//4):
+               pdo_strs.append(''.join(reversed(pdo_data[(i*4):][:4])))
+            pdo_str = " ".join(pdo_strs)
+        else:
+            pdo_str = ""
+        print("{}{}: {}; p{} d{} r{}, {}, p{}, {} {}".format(msg_index, sop_str, msg_type_str, prole_str, drole_str, rev_str, ext_str, pdo_count, myhex((b0, b1)).replace(' ', ''), pdo_str))
     if pdo_count:
-        return bin(b0), bin(b1), pdos
-    return bin(b0), bin(b1)
+        return hex(b0), hex(b1), myhex(pdos)
+    return hex(b0), hex(b1)
+
+def postfactum_decode(length=80):
+    response = []
+    while len(response) < length:
+        # ran out of data? this ends here
+        if packets_pos[0] == len(packets)-1 and packets_pos[1] == len(packets)[packets_pos[0]]-1:
+            # buffer underflow, returning the unfinished buffer with zeroes in the end, just like the FUSB does
+            response = [0]*(length-len(response))
+            return bytes(response)
+        # we still got data to add!
+        # is the current buffer enough?
+        remainder = length - len(response)
+        current_packet = packets[packets_pos[0]]
+        current_packet_end = current_packet[packets_pos[1]:]
+        while remainder > 0:
+            chunk_len = min(len(current_packet_end), remainder)
+            response += current_packet_end[:chunk_len]
+            remainder -= chunk_len
+            packets_pos[1] += chunk_len
+            # now, checking for overflow
+            if packets_pos[1] >= len(current_packet)-1:
+                # sanity check - this should not happen
+                if packets_pos[1] > len(current_packet):
+                    print("Alert, overcount!", packets_pos, len(current_packet_end), chunk_len)
+                # do we need to go to the next packet?
+                if len(packets)-1 <= packets_pos[0]:
+                    # next packet doesn't exist lol
+                    print("We ran out of packet")
+                else:
+                    packets_pos[0] += 1
+                    packets_pos[1] = 0
+            current_packet = packets[packets_pos[0]]
+            current_packet_end = current_packet[packets_pos[1]:]
+        return bytes(response)
+
+def gb():
+    get_buffer(postfactum_decode)
+
+def gba():
+    while True:
+      try:
+        gb(); print()
+      except:
+        break
 
 def request_pdo(num, current, max_current, msg_id=0):
     sop_seq = [0x12, 0x12, 0x12, 0x13, 0x80]
