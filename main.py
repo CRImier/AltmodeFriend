@@ -86,12 +86,16 @@ def set_controls():
     #i2c.writeto_mem(0x22, 0x08, bytes((ctrl2,)) )
 
 def flush_receive():
-    ctrl1 = 0b00000100 # flush receive
-    i2c.writeto_mem(0x22, 0x07, bytes((ctrl1,)) )
+    x = i2c.readfrom_mem(0x22, 0x07, 1)[0]
+    mask = 0b100 # flush receive
+    x |= mask
+    i2c.writeto_mem(0x22, 0x07, bytes((x,)) )
 
 def flush_transmit():
-    ctrl0 = 0b01000100 # flush transmit
-    i2c.writeto_mem(0x22, 0x06, bytes((ctrl0,)) )
+    x = i2c.readfrom_mem(0x22, 0x06, 1)[0]
+    mask = 0b01000000 # flush transmit
+    x |= mask
+    i2c.writeto_mem(0x22, 0x06, bytes((x,)) )
 
 def enable_tx(cc):
     # enables switch on either CC1 or CC2
