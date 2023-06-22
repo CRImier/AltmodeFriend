@@ -464,11 +464,13 @@ def get_buffer(get_rxb=get_rxb):
         return hex(b0), hex(b1), myhex(pdos)
     return hex(b0), hex(b1)
 
-def postfactum_decode(length=80):
+def postfactum_readout(length=80):
+    # A function that helps read data out of our own capture buffer instead of using the FUSB's internal buffer
+    err = 0
     response = []
     while len(response) < length:
         # ran out of data? this ends here
-        if packets_pos[0] == len(packets)-1 and packets_pos[1] == len(packets)[packets_pos[0]]-1:
+        if packets_pos[0] == len(packets)-1 and packets_pos[1] == len(packets[packets_pos[0]])-1:
             # buffer underflow, returning the unfinished buffer with zeroes in the end, just like the FUSB does
             response = [0]*(length-len(response))
             return bytes(response)
@@ -491,7 +493,11 @@ def postfactum_decode(length=80):
                 if len(packets)-1 <= packets_pos[0]:
                     # next packet doesn't exist lol
                     print("We ran out of packet")
+                    err += 1 # malformed packets cause this function to glitch and loop infinitely, hence the error counter
+                    if err == 4:
+                        return bytes(response) # lol gave up here
                 else:
+                    err = 0
                     packets_pos[0] += 1
                     packets_pos[1] = 0
             current_packet = packets[packets_pos[0]]
@@ -499,7 +505,8 @@ def postfactum_decode(length=80):
         return bytes(response)
 
 def gb():
-    get_buffer(postfactum_decode)
+    fun = postfactum_readout if listen else get_rxb
+    return get_buffer(fun)
 
 def gba():
     while True:
