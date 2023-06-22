@@ -517,43 +517,58 @@ def gba():
       except:
         break
 
-def request_pdo(num, current, max_current, msg_id=0):
+def request_pdo(num, current, max_current):
     sop_seq = [0x12, 0x12, 0x12, 0x13, 0x80]
     eop_seq = [0xff, 0x14, 0xfe, 0xa1]
-    obj_count = 1
-    pdo_len = 2 + (4*obj_count)
-    pdo = [0 for i in range(pdo_len)]
-
-    pdo[0] |= 0b10 << 6 # PD 3.0
-    pdo[0] |= 0b00010 # request
-
-    pdo[1] |= obj_count << 4
+    pdo = [0 for i in range(4)]
 
     max_current_b = max_current // 10
     max_current_l = max_current_b & 0xff
     max_current_h = max_current_b >> 8
-    pdo[2] = max_current_l
-    pdo[3] |= max_current_h
+    pdo[0] = max_current_l
+    pdo[1] |= max_current_h
 
     current_b = current // 10
     current_l = current_b & 0x3f
     current_h = current_b >> 6
-    pdo[3] |= current_l << 2
-    pdo[4] |= current_h
+    pdo[1] |= current_l << 2
+    pdo[2] |= current_h
 
-    pdo[5] |= (num+1) << 4 # object position
-    pdo[5] |= (msg_id) << 1 # message ID
-    pdo[5] |= 0b1 # no suspend
+    pdo[3] |= (num+1) << 4 # object position
+    pdo[3] |= 0b1 # no suspend
 
-    sop_seq[4] |= pdo_len
+    send_command(0b00010, pdo)
 
-    #print(myhex(sop_seq))
-    #print(myhex(pdo))
-    #print(myhex(eop_seq))
+def send_command(command, data, msg_id=None, rev=0b10):
+    msg_id = increment_msg_id() if msg_id is None else msg_id
+    sop_seq = [0x12, 0x12, 0x12, 0x13, 0x80]
+    eop_seq = [0xff, 0x14, 0xfe, 0xa1]
+    obj_count = len(data) // 4
+
+    header = [0, 0] # hoot hoot !
+
+    header[0] |= rev << 6 # PD 3.0
+    header[0] |= (command & 0b11111)
+
+    header[1] |= (msg_id & 0b111) << 1 # message ID
+    header[1] |= obj_count << 4
+
+    message = header+data
+
+    sop_seq[4] |= len(message)
+
+    sys.stdout.write('> ')
+    sys.stdout.write(myhex(message))
+    sys.stdout.write('\n')
 
     i2c.writeto_mem(0x22, 0x43, bytes(sop_seq) )
-    i2c.writeto_mem(0x22, 0x43, bytes(pdo) )
+    i2c.writeto_mem(0x22, 0x43, bytes(message) )
     i2c.writeto_mem(0x22, 0x43, bytes(eop_seq) )
+
+def soft_reset():
+    msg_id = increment_msg_id()
+    send_command(0b01101, [], msg_id=msg_id)
+    reset_msg_id()
 
 listen = 0
 
