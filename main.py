@@ -205,26 +205,51 @@ pdos = []
 timing_start = 0
 timing_end = 0
 
-def wait():
-  global pdo_requested, pdos #, timing
-  while True:
-    #s = i2c.readfrom_mem(0x22, 0x3c, 7)
-    #print(s, rxb_state())
-    if rxb_state()[0] == 0:
-      if not pdo_requested:
-        pdos = read_pdos()
-        #sleep(0.01)
-        pdo_i, current = select_pdo(pdos)
-        request_pdo(pdo_i, current, current)
-        print("PDO requested!")
-        pdo_requested = True
+# set to -1 because it's incremented before each command is sent out
+msg_id = -1
 
-def wait_listen():
+def increment_msg_id():
+    global msg_id
+    msg_id += 1
+    if msg_id == 8: msg_id = 0
+    return msg_id
+
+def reset_msg_id():
+    global msg_id
+    msg_id = -1
+
+def sink_flow():
+  global pdo_requested, pdos
+  try:
+   while True:
+    if rxb_state()[0] == 0: # buffer non-empty
+        d = get_message()
+        msg_types = control_message_types if d["c"] else data_message_types
+        msg_name = msg_types[d["t"]]
+        # now we do things depending on the message type that we received
+        if msg_name == "GoodCRC": # example
+            pass # print("GoodCRC")
+        elif msg_name == "Source_Capabilities":
+            # need to request a PDO!
+            pdos = get_pdos(d)
+            pdo_i, current = select_pdo(pdos)
+            # sending a message, need to increment message id
+            request_pdo(pdo_i, current, current)
+            # print("PDO requested!")
+            pdo_requested = True
+        elif msg_name in ["Accept", "PS_RDY"]:
+            print(get_adc_vbus(), "V")
+        show_msg(d)
+    sleep(0.00001) # so that ctrlc works
+  except KeyboardInterrupt:
+    print("CtrlC")
+
+def record_flow():
   while True:
     if rxb_state()[0] == 0:
         print(get_buffer_fast())
         #print(get_rxb(80))
-        #print(get_buffer())
+        #print(get_message())
     sleep(0.001)
 
 def select_pdo_for_resistance(pdos, resistance = 8):
@@ -353,6 +378,16 @@ def read_pdos():
         pdo_list.append(parsed_pdo)
     return pdo_list
 
+def get_pdos(d):
+    pdo_list = []
+    pdos = d["d"]
+    for pdo_i in range(d["dc"]):
+        pdo_bytes = pdos[(pdo_i*4):][:4]
+        #print(myhex(pdo_bytes))
+        parsed_pdo = parse_pdo(pdo_bytes)
+        pdo_list.append(parsed_pdo)
+    return pdo_list
+
 control_message_types = [
     "Reserved",
     "GoodCRC",
@@ -414,9 +449,10 @@ def get_buffer_fast():
 
 header_starts = [0xe0, 0xc0]
 
-def get_buffer(get_rxb=get_rxb):
+def get_message(get_rxb=get_rxb):
     header = 0
-    # we might to get through some message data!
+    d = {}
+    # we might have to get through some message data!
     while header not in header_starts:
         header = get_rxb(1)[0]
         if header == 0:
@@ -425,46 +461,78 @@ def get_buffer(get_rxb=get_rxb):
             # this will be printed, eventually.
             # the aim is that it doesn't delay code in the way that print() seems to
             sys.stdout.write("disc {}\n".format(hex(header)))
+    d["o"] = False # incoming message
+    d["h"] = header
     b1, b0 = get_rxb(2)
+    d["b0"] = b0
+    d["b1"] = b1
     sop = 1 if header == 0xe0 else 0
-    sop_str = "" if sop else "'"
+    d["st"] = sop
     # parsing the packet header
     prole = b0 & 1
-    prole_str = "NC"[prole] if sop else "R"
+    d["pr"] = prole
     drole = b1 >> 5 & 1
-    drole_str = "UD"[drole] if sop else "R"
+    d["dr"] = drole
     msg_type = b1 & 0b11111
     pdo_count = (b0 >> 4) & 0b111
-    if pdo_count == 0:
-        message_types = control_message_types
-    else:
-        message_types = data_message_types
+    d["dc"] = pdo_count
+    d["t"] = msg_type
+    d["c"] = pdo_count == 0 # control if True else data
     msg_index = int((b0 >> 1) & 0b111)
-    msg_type_str = message_types[msg_type] if msg_type < len(message_types) else "Reserved"
+    d["i"] = msg_index
     if pdo_count:
         read_len = pdo_count*4
         pdos = get_rxb(read_len)
+        d["d"] = pdos
     _ = get_rxb(4) # crc
     rev = b1 >> 6
-    rev_str = "123"[rev]
+    d["r"] = rev
     is_ext = b0 >> 7 # extended
-    ext_str = ["std", "ext"][is_ext]
+    d["e"] = is_ext
+    return d
+
+def show_msg(d):
+    ## d["h"] = header
+    ## sop = 1 if header == 0xe0 else 0
+    ## d["st"] = sop
+    sop_str = "" if d["st"] else "'"
+    # parsing the packet header
+    ## d["pr"] = prole
+    prole_str = "NC"[d["pr"]] if d["st"] else "R"
+    drole_str = "UD"[d["dr"]] if d["st"] else "R"
+    ## d["dc"] = pdo_count
+    ## d["t"] = msg_type
+    ## d["c"] = pdo_count == 0 # control if True else data
+    message_types = control_message_types if d["c"]  else data_message_types
+    ## d["i"] = msg_index
+    msg_type_str = message_types[d["t"]] if d["t"] < len(message_types) else "Reserved"
+    ## if pdo_count:
+    ##    d["d"] = pdos
+    ## d["r"] = rev
+    rev_str = "123"[d["r"]]
+    ## d["e"] = is_ext
+    ext_str = ["std", "ext"][d["e"]]
+    # msg direction
+    dir_str = ">" if d["o"] else "<"
     if msg_type_str == "GoodCRC":
-        print("{}: {}".format(msg_index, msg_type_str))
+        sys.stdout.write("{}: {}\n".format(d["i"], msg_type_str))
     else:
-        if pdo_count:
+        if d["dc"]:
             # converting "41 80 00 FF A4 25 00 2C" to "FF008041 2C0025A4"
             pdo_strs = []
-            pdo_data = myhex(pdos).split(' ')
+            pdo_data = myhex(d["d"]).split(' ')
             for i in range(len(pdo_data)//4):
                pdo_strs.append(''.join(reversed(pdo_data[(i*4):][:4])))
             pdo_str = " ".join(pdo_strs)
         else:
             pdo_str = ""
-        print("{}{}: {}; p{} d{} r{}, {}, p{}, {} {}".format(msg_index, sop_str, msg_type_str, prole_str, drole_str, rev_str, ext_str, pdo_count, myhex((b0, b1)).replace(' ', ''), pdo_str))
-    if pdo_count:
+        sys.stdout.write("{} {}{}: {}; p{} d{} r{}, {}, p{}, {} {}\n".format(dir_str, d["i"], sop_str, msg_type_str, prole_str, drole_str, rev_str, ext_str, d["dc"], myhex((d["b0"], d["b1"])).replace(' ', ''), pdo_str))
+    """
+     if pdo_count:
         return hex(b0), hex(b1), myhex(pdos)
     return hex(b0), hex(b1)
+    """
+    return d
 
 def postfactum_readout(length=80):
     # A function that helps read data out of our own capture buffer instead of using the FUSB's internal buffer
@@ -508,7 +576,7 @@ def postfactum_readout(length=80):
 
 def gb():
     fun = postfactum_readout if listen else get_rxb
-    return get_buffer(fun)
+    return show_msg(get_message(fun))
 
 def gba():
     while True:
@@ -588,9 +656,9 @@ def loop():
         flush_transmit()
         flush_receive()
         reset_pd()
-        wait_listen()
+        record_flow()
     else:
         cc = find_cc()
-        wait()
+        sink_flow()
 
 loop()
