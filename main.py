@@ -227,11 +227,10 @@ def wait_listen():
         #print(get_buffer())
     sleep(0.001)
 
-def select_pdo(pdos):
+def select_pdo_for_resistance(pdos, resistance = 8):
     # finding a PDO with maximum extractable power
     # for a given static resistance,
     # while making sure that we don't overcurrent the PSU
-    resistance = 8
     # calculation storage lists
     power_levels = []
     currents = []
@@ -257,6 +256,20 @@ def select_pdo(pdos):
     i = power_levels.index(max(power_levels))
     # returning the PDO index + current we'd need
     return i, currents[i]
+
+expected_voltage = 20
+
+def select_pdo_for_voltage(pdos, voltage=None, current=None):
+    if voltage is None: voltage = expected_voltage
+    for i, pdo in enumerate(pdos):
+        if pdo[0] != 'fixed': # skipping variable PDOs
+            continue
+        t, pdo_voltage, max_current, oc, flags = pdo
+        if pdo_voltage//1000 == voltage:
+            current = current if current else max_current
+            return i, current
+
+select_pdo = select_pdo_for_voltage
 
 def time_pdos():
     global timing_start, timing_end
