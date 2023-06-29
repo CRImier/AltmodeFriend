@@ -237,12 +237,70 @@ def sink_flow():
             request_pdo(pdo_i, current, current)
             # print("PDO requested!")
             pdo_requested = True
+            print(pdos)
         elif msg_name in ["Accept", "PS_RDY"]:
             print(get_adc_vbus(), "V")
+        elif msg_name == "Vendor_Defined":
+            parse_vdm(d)
         show_msg(d)
     sleep(0.00001) # so that ctrlc works
   except KeyboardInterrupt:
     print("CtrlC")
+
+vdm_commands = [
+    "Reserved",
+    "Discover Identity",
+    "Discover SVIDs",
+    "Discover Modes",
+    "Enter Mode",
+    "Exit Mode",
+    "Attention"]
+
+svids = {
+    0xff00: 'SID',
+    0xff01: 'DisplayPort',
+}
+
+dp_commands = {
+    0x10: "DP Status Update",
+    0x11: "DP Configure"}
+
+def react_vdm(d):
+    data = d['d']
+    is_structured = data[1] >> 7
+    if is_structured:
+        # version: major and minor
+        cmd_type = data[0]>>6
+        command = data[0] & 0b11111
+        command_name = "SVID specific {}".format(bin(command)) if command > 15 else vdm_commands[command] if command < 7 else "Reserved"
+        print("VDM: str, m{} v{} o{}, ct{} {}".format(svid_name, version_str, objpos_str, cmd_type, command_name))
+    # idk what to do if the vdm is unstructured, for now
+
+def parse_vdm(d):
+    data = d['d']
+    is_structured = data[1] >> 7
+    svid = (data[3] << 8) + data[2]
+    svid_name = svids.get(svid, "Unknown ({})".format(hex(svid)))
+    if svid_name == "Unknown": print(hex(svid))
+    if is_structured:
+        # version: major and minor
+        version_bin = (data[1] >> 3) & 0xf
+        version_str = mybin([version_bin])[4:]
+        obj_pos = data[1] & 0b111
+        objpos_str = mybin([obj_pos])[5:]
+        cmd_type = ["REQ", "ACK", "NAK", "BUSY"][data[0]>>6]
+        command = data[0] & 0b11111
+        if command > 15:
+            command_name = "SVID specific {}".format(bin(command))
+            if svid_name == "DisplayPort":
+                command_name = dp_commands.get(command, command_name)
+        else:
+            command_name = vdm_commands[command] if command < 7 else "Reserved"
+        print("VDM: str, m{} v{} o{}, ct{}: {}".format(svid_name, version_str, objpos_str, cmd_type, command_name))
+        parse_dp_command(version_str())
+    else:
+        vdmd = [data[1] & 0x7f, data[0]]
+        print("VDM: unstr, m{}, d{}".format(svid_name, myhex(vdmd)))
 
 def record_flow():
   while True:
@@ -493,6 +551,11 @@ def show_msg(d):
     else:
         pdo_str = ""
     sys.stdout.write("{} {}{}: {}; p{} d{} r{}, {}, p{}, {} {}\n".format(dir_str, d["i"], sop_str, msg_type_str, prole_str, drole_str, rev_str, ext_str, d["dc"], myhex((d["b0"], d["b1"])).replace(' ', ''), pdo_str))
+    # extra parsing where possible
+    if msg_type_str == "Vendor_Defined":
+        parse_vdm(d)
+    elif msg_type_str == "Source_Capabilities":
+        print(get_pdos(d))
     return d
 
 def postfactum_readout(length=80):
