@@ -294,7 +294,7 @@ def select_pdo_for_voltage(pdos, voltage=None, current=None):
             current = current if current else max_current
             return i, current
 
-select_pdo = select_pdo_for_voltage
+select_pdo = select_pdo_for_resistance
 
 def myhex(b, j=" "):
     l = []
