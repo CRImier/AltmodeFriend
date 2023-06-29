@@ -483,24 +483,16 @@ def show_msg(d):
     ext_str = ["std", "ext"][d["e"]]
     # msg direction
     dir_str = ">" if d["o"] else "<"
-    if msg_type_str == "GoodCRC":
-        sys.stdout.write("{}: {}\n".format(d["i"], msg_type_str))
+    if d["dc"]:
+        # converting "41 80 00 FF A4 25 00 2C" to "FF008041 2C0025A4"
+        pdo_strs = []
+        pdo_data = myhex(d["d"]).split(' ')
+        for i in range(len(pdo_data)//4):
+           pdo_strs.append(''.join(reversed(pdo_data[(i*4):][:4])))
+        pdo_str = " ".join(pdo_strs)
     else:
-        if d["dc"]:
-            # converting "41 80 00 FF A4 25 00 2C" to "FF008041 2C0025A4"
-            pdo_strs = []
-            pdo_data = myhex(d["d"]).split(' ')
-            for i in range(len(pdo_data)//4):
-               pdo_strs.append(''.join(reversed(pdo_data[(i*4):][:4])))
-            pdo_str = " ".join(pdo_strs)
-        else:
-            pdo_str = ""
-        sys.stdout.write("{} {}{}: {}; p{} d{} r{}, {}, p{}, {} {}\n".format(dir_str, d["i"], sop_str, msg_type_str, prole_str, drole_str, rev_str, ext_str, d["dc"], myhex((d["b0"], d["b1"])).replace(' ', ''), pdo_str))
-    """
-     if pdo_count:
-        return hex(b0), hex(b1), myhex(pdos)
-    return hex(b0), hex(b1)
-    """
+        pdo_str = ""
+    sys.stdout.write("{} {}{}: {}; p{} d{} r{}, {}, p{}, {} {}\n".format(dir_str, d["i"], sop_str, msg_type_str, prole_str, drole_str, rev_str, ext_str, d["dc"], myhex((d["b0"], d["b1"])).replace(' ', ''), pdo_str))
     return d
 
 def postfactum_readout(length=80):
