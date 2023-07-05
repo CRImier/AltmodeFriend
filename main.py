@@ -16,6 +16,12 @@ def get_adc_vbus():
 
 print(get_adc_vbus(), "V")
 
+########################
+#
+# FUSB-specific code
+#
+########################
+
 def reset():
     # reset the entire FUSB
     i2c.writeto_mem(0x22, 0xc, bytes([0b1]))
@@ -150,7 +156,8 @@ def hard_reset():
     i2c.writeto_mem(0x22, 0x09, bytes([0b1000000]))
     return i2c.readfrom_mem(0x22, 0x09, 1)
 
-# shorthands
+# toggle logic shorthands
+# currently unused
 
 polarity_values = (
   (0, 0),   # 000: logic still running
@@ -195,6 +202,13 @@ def find_cc():
     #import gc; gc.collect()
     reset_pd()
     return cc
+
+
+########################
+#
+# USB-C stacc code
+#
+########################
 
 pdo_requested = False
 pdos = []
@@ -252,6 +266,12 @@ def sink_flow():
   except KeyboardInterrupt:
     print("CtrlC")
 
+########################
+#
+# VDM parsing code
+#
+########################
+
 vdm_commands = [
     "Reserved",
     "Discover Identity",
@@ -307,13 +327,11 @@ def parse_vdm(d):
         vdmd = [data[1] & 0x7f, data[0]]
         print("VDM: unstr, m{}, d{}".format(svid_name, myhex(vdmd)))
 
-def record_flow():
-  while True:
-    if rxb_state()[0] == 0:
-        print(get_buffer_fast())
-        #print(get_rxb(80))
-        #print(get_message())
-    sleep(0.001)
+########################
+#
+# Power profile selection sample code
+#
+########################
 
 def select_pdo_for_resistance(pdos, resistance = 8):
     # finding a PDO with maximum extractable power
@@ -359,6 +377,12 @@ def select_pdo_for_voltage(pdos, voltage=None, current=None):
 
 select_pdo = select_pdo_for_resistance
 
+########################
+#
+# Helper features
+#
+########################
+
 def myhex(b, j=" "):
     l = []
     for e in b:
@@ -376,6 +400,12 @@ def mybin(b, j=" "):
             e = ("0"*(8-len(e)))+e
         l.append(e)
     return j.join(l)
+
+########################
+#
+# PDO parsing code
+#
+########################
 
 pdo_types = ['fixed', 'batt', 'var', 'pps']
 pps_types = ['spr', 'epr', 'res', 'res']
@@ -603,6 +633,20 @@ def postfactum_readout(length=80):
             current_packet_end = current_packet[packets_pos[1]:]
         return bytes(response)
 
+########################
+#
+# Packet capture code
+#
+########################
+
+def record_flow():
+  while True:
+    if rxb_state()[0] == 0:
+        print(get_buffer_fast())
+        #print(get_rxb(80))
+        #print(get_message())
+    sleep(0.001)
+
 def gb():
     fun = postfactum_readout if listen else get_rxb
     return show_msg(get_message(fun))
@@ -665,6 +709,13 @@ def soft_reset():
     msg_id = increment_msg_id()
     send_command(0b01101, [], msg_id=msg_id)
     reset_msg_id()
+
+
+########################
+#
+# Main loop selection code
+#
+########################
 
 listen = 0
 
