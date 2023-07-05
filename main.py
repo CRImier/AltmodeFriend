@@ -185,11 +185,6 @@ def p_cur():
 
 #sleep(1)
 
-reset()
-power()
-unmask_all()
-set_controls()
-
 def find_cc():
     cc = measure()
     flush_receive()
@@ -219,9 +214,12 @@ def reset_msg_id():
     global msg_id
     msg_id = -1
 
+sent_messages = []
+
 def sink_flow():
-  global pdo_requested, pdos
+  global pdo_requested, pdos, sent_messages
   try:
+   timeout = 0.00001
    while True:
     if rxb_state()[0] == 0: # buffer non-empty
         d = get_message()
@@ -238,13 +236,19 @@ def sink_flow():
             request_pdo(pdo_i, current, current)
             # print("PDO requested!")
             pdo_requested = True
-            print(pdos)
+            sys.stdout.write(str(pdos))
+            sys.stdout.write('\n')
         elif msg_name in ["Accept", "PS_RDY"]:
             print(get_adc_vbus(), "V")
         elif msg_name == "Vendor_Defined":
             parse_vdm(d)
         show_msg(d)
-    sleep(0.00001) # so that ctrlc works
+        for message in sent_messages:
+            sys.stdout.write('> ')
+            sys.stdout.write(myhex(message))
+            sys.stdout.write('\n')
+        sent_messages = []
+    sleep(timeout) # so that ctrlc works
   except KeyboardInterrupt:
     print("CtrlC")
 
@@ -651,13 +655,11 @@ def send_command(command, data, msg_id=None, rev=0b10):
 
     sop_seq[4] |= len(message)
 
-    sys.stdout.write('> ')
-    sys.stdout.write(myhex(message))
-    sys.stdout.write('\n')
-
     i2c.writeto_mem(0x22, 0x43, bytes(sop_seq) )
     i2c.writeto_mem(0x22, 0x43, bytes(message) )
     i2c.writeto_mem(0x22, 0x43, bytes(eop_seq) )
+
+    sent_messages.append(message)
 
 def soft_reset():
     msg_id = increment_msg_id()
@@ -674,6 +676,11 @@ listen = 0
 # TODO 2: elaborate on what I wrote here
 
 def loop():
+    reset()
+    power()
+    unmask_all()
+    set_controls()
+
     if listen:
         cc = 1
         flush_receive()
@@ -688,4 +695,6 @@ def loop():
         cc = find_cc()
         sink_flow()
 
+#listen = 1; packets = packets1; gba()
 loop()
+
