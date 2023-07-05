@@ -659,7 +659,8 @@ def gba():
     while True:
       try:
         gb(); print()
-      except:
+      except Exception as e:
+        raise e
         break
 
 def request_fixed_pdo(num, current, max_current):
@@ -724,8 +725,7 @@ def send_command(command, data, msg_id=None, rev=0b10):
     sent_messages.append(message)
 
 def soft_reset():
-    msg_id = increment_msg_id()
-    send_command(0b01101, [], msg_id=msg_id)
+    send_command(0b01101, [])
     reset_msg_id()
 
 
