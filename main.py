@@ -102,9 +102,10 @@ def enable_tx(cc):
     x = i2c.readfrom_mem(0x22, 0x03, 1)[0]
     x1 = x
     mask = 0b10 if cc == 2 else 0b1
-    x &= 0b11111100 # clearing both TX bits
+    x &= 0b10011100 # clearing both TX bits and revision bits
     x |= mask
     x |= 0b100
+    x |= 0b10 << 5 # revision 3.0
     #print('et', bin(x1), bin(x), cc)
     i2c.writeto_mem(0x22, 0x03, bytes((x,)) )
 
@@ -640,7 +641,7 @@ def send_command(command, data, msg_id=None, rev=0b10):
 
     header = [0, 0] # hoot hoot !
 
-    header[0] |= rev << 6 # PD 3.0
+    header[0] |= rev << 6 # PD revision
     header[0] |= (command & 0b11111)
 
     header[1] |= (msg_id & 0b111) << 1 # message ID
