@@ -256,6 +256,7 @@ def sink_flow():
             print(get_adc_vbus(), "V")
         elif msg_name == "Vendor_Defined":
             parse_vdm(d)
+            react_vdm(d)
         show_msg(d)
         for message in sent_messages:
             sys.stdout.write('> ')
@@ -290,17 +291,83 @@ dp_commands = {
     0x10: "DP Status Update",
     0x11: "DP Configure"}
 
+vdm_cmd_types = ["REQ", "ACK", "NAK", "BUSY"]
+
 def react_vdm(d):
-    data = d['d']
-    is_structured = data[1] >> 7
-    if is_structured:
+    if d["vdm_s"]:
         # version: major and minor
-        cmd_type = data[0]>>6
-        command = data[0] & 0b11111
-        command_name = "SVID specific {}".format(bin(command)) if command > 15 else vdm_commands[command] if command < 7 else "Reserved"
-        print("VDM: str, m{} v{} o{}, ct{} {}".format(svid_name, version_str, objpos_str, cmd_type, command_name))
+        cmd_type = d["vdm_ct"]
+        command_name = d["vdm_cn"]
+        if command_name == "Discover Identity":
+            data = list(b'A\xA0\x00\xff\xa4%\x00,\x00\x00\x00\x00\x01\x00\x00\x00\x0b\x00\x00\x11')
+            send_command(d["t"], data)
+            #sys.stdout.write("a")
+        elif command_name == "Discover SVIDs":
+            data = list(b'B\xA0\x00\xff\x00\x00\x01\xff')
+            send_command(d["t"], data)
+            #sys.stdout.write("b")
+        elif command_name == "Discover Modes":
+            data = list(b'C\xA0\x01\xff\x05\x0c\x00\x00')
+            send_command(d["t"], data)
+            #sys.stdout.write("c")
+        elif command_name == "Enter Mode":
+            data = list(b'D\xA1\x01\xff')
+            send_command(d["t"], data)
+            #sys.stdout.write("d")
+        elif command_name == "DP Status Update":
+            data = list(b'P\xA1\x01\xff\x1a\x00\x00\x00')
+            send_command(d["t"], data)
+            #sys.stdout.write("e")
+        elif command_name == "DP Configure":
+            data = list(b'Q\xA1\x01\xff')
+            send_command(d["t"], data)
+            #sys.stdout.write("f")
     # idk what to do if the vdm is unstructured, for now
 
+def parse_vdm(d):
+    data = d['d']
+    is_structured = data[1] >> 7
+    d["vdm_s"] = is_structured
+    svid = (data[3] << 8) + data[2]
+    d["vdm_sv"] = svid
+    svid_name = svids.get(svid, "Unknown ({})".format(hex(svid)))
+    d["vdm_svn"] = svid_name
+    if is_structured:
+        # version: major and minor
+        version_bin = (data[1] >> 3) & 0xf
+        d["vdm_v"] = version_bin
+        obj_pos = data[1] & 0b111
+        d["vdm_o"] = obj_pos
+        cmd_type = data[0]>>6
+        d["vdm_ct"] = cmd_type
+        command = data[0] & 0b11111
+        d["vdm_c"] = command
+        if command > 15:
+            command_name = "SVID specific {}".format(bin(command))
+            if svid_name == "DisplayPort":
+                command_name = dp_commands.get(command, command_name)
+        else:
+            command_name = vdm_commands[command] if command < 7 else "Reserved"
+        d["vdm_cn"] = command_name
+        #if svid_name == "DisplayPort":
+        #    parse_dp_command(version_str())
+    else:
+        vdmd = [data[1] & 0x7f, data[0]]
+        d["vdm_d"] = vdmd
+
+def print_vdm(d):
+    if d["vdm_s"]:
+        svid_name = d["vdm_svn"]
+        version_str = mybin([d["vdm_v"]])[4:]
+        objpos_str = mybin([d["vdm_o"]])[5:]
+        cmd_type_name = vdm_cmd_types[d["vdm_ct"]]
+        cmd_name = d["vdm_cn"]
+        sys.stdout.write("VDM: str, m{} v{} o{}, ct{}: {}\n".format(svid_name, version_str, objpos_str, cmd_type_name, cmd_name))
+    else:
+        sys.stdout.write("VDM: unstr, m{}, d{}".format(svid_name, myhex(d["vdm_d"])))
+
+
+"""
 def parse_vdm(d):
     data = d['d']
     is_structured = data[1] >> 7
@@ -321,11 +388,9 @@ def parse_vdm(d):
                 command_name = dp_commands.get(command, command_name)
         else:
             command_name = vdm_commands[command] if command < 7 else "Reserved"
-        print("VDM: str, m{} v{} o{}, ct{}: {}".format(svid_name, version_str, objpos_str, cmd_type, command_name))
-        parse_dp_command(version_str())
-    else:
-        vdmd = [data[1] & 0x7f, data[0]]
-        print("VDM: unstr, m{}, d{}".format(svid_name, myhex(vdmd)))
+        if svid_name == "DisplayPort":
+            parse_dp_command(version_str())
+"""
 
 ########################
 #
@@ -554,6 +619,11 @@ def get_message(get_rxb=get_rxb):
     d["r"] = rev
     is_ext = b0 >> 7 # extended
     d["e"] = is_ext
+    msg_types = control_message_types if pdo_count == 0 else data_message_types
+    msg_name = msg_types[d["t"]]
+    d["tn"] = msg_name
+    if msg_name == "Vendor_Defined":
+        parse_vdm(d)
     return d
 
 def show_msg(d):
@@ -591,9 +661,12 @@ def show_msg(d):
     sys.stdout.write("{} {}{}: {}; p{} d{} r{}, {}, p{}, {} {}\n".format(dir_str, d["i"], sop_str, msg_type_str, prole_str, drole_str, rev_str, ext_str, d["dc"], myhex((d["b0"], d["b1"])).replace(' ', ''), pdo_str))
     # extra parsing where possible
     if msg_type_str == "Vendor_Defined":
-        parse_vdm(d)
+        print_vdm(d)
+        #sys.stdout.write(str(d["d"]))
+        #sys.stdout.write('\n')
     elif msg_type_str == "Source_Capabilities":
-        print(get_pdos(d))
+        sys.stdout.write(str(get_pdos(d)))
+        sys.stdout.write('\n')
     return d
 
 def postfactum_readout(length=80):
