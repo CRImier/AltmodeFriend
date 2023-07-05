@@ -156,7 +156,18 @@ def hard_reset():
     i2c.writeto_mem(0x22, 0x09, bytes([0b1000000]))
     return i2c.readfrom_mem(0x22, 0x09, 1)
 
-# toggle logic shorthands
+def find_cc():
+    cc = measure()
+    flush_receive()
+    enable_tx(cc)
+    read_cc(cc)
+    flush_transmit()
+    flush_receive()
+    #import gc; gc.collect()
+    reset_pd()
+    return cc
+
+# FUSB toggle logic shorthands
 # currently unused
 
 polarity_values = (
@@ -187,22 +198,6 @@ def p_int(a=None):
 
 def p_cur():
     return current_values[cc_current()]
-
-# test sketch - sets up for comms
-
-#sleep(1)
-
-def find_cc():
-    cc = measure()
-    flush_receive()
-    enable_tx(cc)
-    read_cc(cc)
-    flush_transmit()
-    flush_receive()
-    #import gc; gc.collect()
-    reset_pd()
-    return cc
-
 
 ########################
 #
@@ -269,7 +264,280 @@ def sink_flow():
 
 ########################
 #
-# VDM parsing code
+# Packet reception
+# and parsing code
+#
+########################
+
+control_message_types = [
+    "Reserved",
+    "GoodCRC",
+    "GotoMin",
+    "Accept",
+    "Reject",
+    "Ping",
+    "PS_RDY",
+    "Get_Source_Cap",
+    "Get_Sink_Cap",
+    "DR_Swap",
+    "PR_Swap",
+    "VCONN_Swap",
+    "Wait",
+    "Soft_Reset",
+    "Data_Reset",
+    "Data_Reset_Complete",
+    "Not_Supported",
+    "Get_Source_Cap_Extended",
+    "Get_Status",
+    "FR_Swap",
+    "Get_PPS_Status",
+    "Get_Country_Codes",
+    "Get_Sink_Cap_Extended",
+    "Get_Source_Info",
+    "Get_Revision",
+]
+
+data_message_types = [
+    "Reserved",
+    "Source_Capabilities",
+    "Request",
+    "BIST",
+    "Sink_Capabilities",
+    "Battery_Status",
+    "Alert",
+    "Get_Country_Info",
+    "Enter_USB",
+    "EPR_Request",
+    "EPR_Mode",
+    "Source_Info",
+    "Revision",
+    "Reserved",
+    "Reserved",
+    "Vendor_Defined",
+]
+
+header_starts = [0xe0, 0xc0]
+
+def get_message(get_rxb=get_rxb):
+    header = 0
+    d = {}
+    # we might have to get through some message data!
+    while header not in header_starts:
+        header = get_rxb(1)[0]
+        if header == 0:
+            return
+        if header not in header_starts:
+            # this will be printed, eventually.
+            # the aim is that it doesn't delay code in the way that print() seems to
+            sys.stdout.write("disc {}\n".format(hex(header)))
+    d["o"] = False # incoming message
+    d["h"] = header
+    b1, b0 = get_rxb(2)
+    d["b0"] = b0
+    d["b1"] = b1
+    sop = 1 if header == 0xe0 else 0
+    d["st"] = sop
+    # parsing the packet header
+    prole = b0 & 1
+    d["pr"] = prole
+    drole = b1 >> 5 & 1
+    d["dr"] = drole
+    msg_type = b1 & 0b11111
+    pdo_count = (b0 >> 4) & 0b111
+    d["dc"] = pdo_count
+    d["t"] = msg_type
+    d["c"] = pdo_count == 0 # control if True else data
+    msg_index = int((b0 >> 1) & 0b111)
+    d["i"] = msg_index
+    if pdo_count:
+        read_len = pdo_count*4
+        pdos = get_rxb(read_len)
+        d["d"] = pdos
+    _ = get_rxb(4) # crc
+    rev = b1 >> 6
+    d["r"] = rev
+    is_ext = b0 >> 7 # extended
+    d["e"] = is_ext
+    msg_types = control_message_types if pdo_count == 0 else data_message_types
+    msg_name = msg_types[d["t"]]
+    d["tn"] = msg_name
+    if msg_name == "Vendor_Defined":
+        parse_vdm(d)
+    return d
+
+def show_msg(d):
+    ## d["h"] = header
+    ## sop = 1 if header == 0xe0 else 0
+    ## d["st"] = sop
+    sop_str = "" if d["st"] else "'"
+    # parsing the packet header
+    ## d["pr"] = prole
+    prole_str = "NC"[d["pr"]] if d["st"] else "R"
+    drole_str = "UD"[d["dr"]] if d["st"] else "R"
+    ## d["dc"] = pdo_count
+    ## d["t"] = msg_type
+    ## d["c"] = pdo_count == 0 # control if True else data
+    message_types = control_message_types if d["c"]  else data_message_types
+    ## d["i"] = msg_index
+    msg_type_str = message_types[d["t"]] if d["t"] < len(message_types) else "Reserved"
+    ## if pdo_count:
+    ##    d["d"] = pdos
+    ## d["r"] = rev
+    rev_str = "123"[d["r"]]
+    ## d["e"] = is_ext
+    ext_str = ["std", "ext"][d["e"]]
+    # msg direction
+    dir_str = ">" if d["o"] else "<"
+    if d["dc"]:
+        # converting "41 80 00 FF A4 25 00 2C" to "FF008041 2C0025A4"
+        pdo_strs = []
+        pdo_data = myhex(d["d"]).split(' ')
+        for i in range(len(pdo_data)//4):
+           pdo_strs.append(''.join(reversed(pdo_data[(i*4):][:4])))
+        pdo_str = " ".join(pdo_strs)
+    else:
+        pdo_str = ""
+    sys.stdout.write("{} {}{}: {}; p{} d{} r{}, {}, p{}, {} {}\n".format(dir_str, d["i"], sop_str, msg_type_str, prole_str, drole_str, rev_str, ext_str, d["dc"], myhex((d["b0"], d["b1"])).replace(' ', ''), pdo_str))
+    # extra parsing where possible
+    if msg_type_str == "Vendor_Defined":
+        print_vdm(d)
+        #sys.stdout.write(str(d["d"]))
+        #sys.stdout.write('\n')
+    elif msg_type_str == "Source_Capabilities":
+        sys.stdout.write(str(get_pdos(d)))
+        sys.stdout.write('\n')
+    return d
+
+########################
+#
+# PDO parsing code
+#
+########################
+
+pdo_types = ['fixed', 'batt', 'var', 'pps']
+pps_types = ['spr', 'epr', 'res', 'res']
+
+def parse_pdo(pdo):
+    pdo_t = pdo_types[pdo[3] >> 6]
+    if pdo_t == 'fixed':
+        current_h = pdo[1] & 0b11
+        current_b = ( current_h << 8 ) | pdo[0]
+        current = current_b * 10
+        voltage_h = pdo[2] & 0b1111
+        voltage_b = ( voltage_h << 6 ) | (pdo[1] >> 2)
+        voltage = voltage_b * 50
+        peak_current = (pdo[2] >> 4) & 0b11
+        return (pdo_t, voltage, current, peak_current, pdo[3])
+    elif pdo_t == 'batt':
+        # TODO
+        return ('batt', pdo)
+    elif pdo_t == 'var':
+        current_h = pdo[1] & 0b11
+        current = ( current_h << 8 ) | pdo[0]*10
+        # TODO
+        return ('var', current, pdo)
+    elif pdo_t == 'pps':
+        t = (pdo[3] >> 4) & 0b11
+        limited = (pdo[3] >> 5) & 0b1
+        max_voltage_h = pdo[3] & 0b1
+        max_voltage_b = (max_voltage_h << 7) | pdo[2] >> 1
+        max_voltage = max_voltage_b * 100
+        min_voltage = pdo[1] * 100
+        max_current_b = pdo[0] & 0b1111111
+        max_current = max_current_b * 50
+        return ('pps', pps_types[t], max_voltage, min_voltage, max_current, limited)
+
+def get_pdos(d):
+    pdo_list = []
+    pdos = d["d"]
+    for pdo_i in range(d["dc"]):
+        pdo_bytes = pdos[(pdo_i*4):][:4]
+        #print(myhex(pdo_bytes))
+        parsed_pdo = parse_pdo(pdo_bytes)
+        pdo_list.append(parsed_pdo)
+    return pdo_list
+
+########################
+#
+# Command sending code
+# and simple commands
+#
+########################
+
+def send_command(command, data, msg_id=None, rev=0b10):
+    msg_id = increment_msg_id() if msg_id is None else msg_id
+    sop_seq = [0x12, 0x12, 0x12, 0x13, 0x80]
+    eop_seq = [0xff, 0x14, 0xfe, 0xa1]
+    obj_count = len(data) // 4
+
+    header = [0, 0] # hoot hoot !
+
+    header[0] |= rev << 6 # PD revision
+    header[0] |= (command & 0b11111)
+
+    header[1] |= (msg_id & 0b111) << 1 # message ID
+    header[1] |= obj_count << 4
+
+    message = header+data
+
+    sop_seq[4] |= len(message)
+
+    i2c.writeto_mem(0x22, 0x43, bytes(sop_seq) )
+    i2c.writeto_mem(0x22, 0x43, bytes(message) )
+    i2c.writeto_mem(0x22, 0x43, bytes(eop_seq) )
+
+    sent_messages.append(message)
+
+def soft_reset():
+    send_command(0b01101, [])
+    reset_msg_id()
+
+########################
+#
+# PDO request code
+#
+########################
+
+def request_fixed_pdo(num, current, max_current):
+    pdo = [0 for i in range(4)]
+
+    max_current_b = max_current // 10
+    max_current_l = max_current_b & 0xff
+    max_current_h = max_current_b >> 8
+    pdo[0] = max_current_l
+    pdo[1] |= max_current_h
+
+    current_b = current // 10
+    current_l = current_b & 0x3f
+    current_h = current_b >> 6
+    pdo[1] |= current_l << 2
+    pdo[2] |= current_h
+
+    pdo[3] |= (num+1) << 4 # object position
+    pdo[3] |= 0b1 # no suspend
+
+    send_command(0b00010, pdo)
+
+def request_pps_pdo(num, voltage, current):
+    pdo = [0 for i in range(4)]
+
+    current = current // 50
+    pdo[0] = current & 0x7f
+
+    voltage = voltage // 20
+    voltage_l = (voltage & 0x7f)
+    voltage_h = (voltage >> 7) & 0x1f
+    pdo[1] |= voltage_l << 1
+    pdo[2] = voltage_h
+
+    pdo[3] |= (num+1) << 4 # object position
+    pdo[3] |= 0b1 # no suspend
+
+    send_command(0b00010, pdo)
+
+########################
+#
+# VDM parsing and response code
 #
 ########################
 
@@ -366,35 +634,9 @@ def print_vdm(d):
     else:
         sys.stdout.write("VDM: unstr, m{}, d{}".format(svid_name, myhex(d["vdm_d"])))
 
-
-"""
-def parse_vdm(d):
-    data = d['d']
-    is_structured = data[1] >> 7
-    svid = (data[3] << 8) + data[2]
-    svid_name = svids.get(svid, "Unknown ({})".format(hex(svid)))
-    if svid_name == "Unknown": print(hex(svid))
-    if is_structured:
-        # version: major and minor
-        version_bin = (data[1] >> 3) & 0xf
-        version_str = mybin([version_bin])[4:]
-        obj_pos = data[1] & 0b111
-        objpos_str = mybin([obj_pos])[5:]
-        cmd_type = ["REQ", "ACK", "NAK", "BUSY"][data[0]>>6]
-        command = data[0] & 0b11111
-        if command > 15:
-            command_name = "SVID specific {}".format(bin(command))
-            if svid_name == "DisplayPort":
-                command_name = dp_commands.get(command, command_name)
-        else:
-            command_name = vdm_commands[command] if command < 7 else "Reserved"
-        if svid_name == "DisplayPort":
-            parse_dp_command(version_str())
-"""
-
 ########################
 #
-# Power profile selection sample code
+# Power profile selection example code
 #
 ########################
 
@@ -443,132 +685,27 @@ def select_pdo_for_voltage(pdos, voltage=None, current=None):
             current = current if current else max_current
             return i, current
 
+# example function used by default
 select_pdo = select_pdo_for_resistance
 
 ########################
 #
-# Helper features
+# Packet capture code
 #
 ########################
-
-def myhex(b, j=" "):
-    l = []
-    for e in b:
-        e = hex(e)[2:].upper()
-        if len(e) < 2:
-            e = ("0"*(2-len(e)))+e
-        l.append(e)
-    return j.join(l)
-
-def mybin(b, j=" "):
-    l = []
-    for e in b:
-        e = bin(e)[2:].upper()
-        if len(e) < 8:
-            e = ("0"*(8-len(e)))+e
-        l.append(e)
-    return j.join(l)
-
-########################
-#
-# PDO parsing code
-#
-########################
-
-pdo_types = ['fixed', 'batt', 'var', 'pps']
-pps_types = ['spr', 'epr', 'res', 'res']
-
-def parse_pdo(pdo):
-    pdo_t = pdo_types[pdo[3] >> 6]
-    if pdo_t == 'fixed':
-        current_h = pdo[1] & 0b11
-        current_b = ( current_h << 8 ) | pdo[0]
-        current = current_b * 10
-        voltage_h = pdo[2] & 0b1111
-        voltage_b = ( voltage_h << 6 ) | (pdo[1] >> 2)
-        voltage = voltage_b * 50
-        peak_current = (pdo[2] >> 4) & 0b11
-        return (pdo_t, voltage, current, peak_current, pdo[3])
-    elif pdo_t == 'batt':
-        # TODO
-        return ('batt', pdo)
-    elif pdo_t == 'var':
-        current_h = pdo[1] & 0b11
-        current = ( current_h << 8 ) | pdo[0]*10
-        # TODO
-        return ('var', current, pdo)
-    elif pdo_t == 'pps':
-        t = (pdo[3] >> 4) & 0b11
-        limited = (pdo[3] >> 5) & 0b1
-        max_voltage_h = pdo[3] & 0b1
-        max_voltage_b = (max_voltage_h << 7) | pdo[2] >> 1
-        max_voltage = max_voltage_b * 100
-        min_voltage = pdo[1] * 100
-        max_current_b = pdo[0] & 0b1111111
-        max_current = max_current_b * 50
-        return ('pps', pps_types[t], max_voltage, min_voltage, max_current, limited)
-
-def get_pdos(d):
-    pdo_list = []
-    pdos = d["d"]
-    for pdo_i in range(d["dc"]):
-        pdo_bytes = pdos[(pdo_i*4):][:4]
-        #print(myhex(pdo_bytes))
-        parsed_pdo = parse_pdo(pdo_bytes)
-        pdo_list.append(parsed_pdo)
-    return pdo_list
-
-control_message_types = [
-    "Reserved",
-    "GoodCRC",
-    "GotoMin",
-    "Accept",
-    "Reject",
-    "Ping",
-    "PS_RDY",
-    "Get_Source_Cap",
-    "Get_Sink_Cap",
-    "DR_Swap",
-    "PR_Swap",
-    "VCONN_Swap",
-    "Wait",
-    "Soft_Reset",
-    "Data_Reset",
-    "Data_Reset_Complete",
-    "Not_Supported",
-    "Get_Source_Cap_Extended",
-    "Get_Status",
-    "FR_Swap",
-    "Get_PPS_Status",
-    "Get_Country_Codes",
-    "Get_Sink_Cap_Extended",
-    "Get_Source_Info",
-    "Get_Revision",
-]
-
-data_message_types = [
-    "Reserved",
-    "Source_Capabilities",
-    "Request",
-    "BIST",
-    "Sink_Capabilities",
-    "Battery_Status",
-    "Alert",
-    "Get_Country_Info",
-    "Enter_USB",
-    "EPR_Request",
-    "EPR_Mode",
-    "Source_Info",
-    "Revision",
-    "Reserved",
-    "Reserved",
-    "Vendor_Defined",
-]
 
 packets = []
 packets1 = [[192, 143, 16, 1, 160, 0, 255, 164, 69, 2, 114, 192, 143, 16, 1, 160, 0, 255, 164, 69, 2, 114, 192, 143, 16, 1, 160, 0, 255, 164, 69, 2, 114, 224, 161, 17, 44, 145, 1, 39, 177, 155, 38, 148, 224, 161, 17, 44, 145, 1, 39, 177, 155, 38, 148, 224, 161, 17, 44, 145, 1, 39, 177, 155, 38, 148, 192, 143, 18, 1, 160, 0, 255, 196, 22, 194, 8, 192, 143, 18, 1, 160, 0, 255, 196, 22, 194, 8, 192, 143, 18, 1, 160, 0, 255, 196, 22, 194, 8], [224, 161, 17, 44, 145, 1, 39, 177, 155, 38, 148, 224, 161, 17, 44, 145, 1, 39, 177, 155, 38, 148, 224, 161, 17, 44, 145, 1, 39, 177, 155, 38, 148, 192, 143, 20, 1, 160, 0, 255, 100, 227, 130, 135, 192, 143, 20, 1, 160, 0, 255, 100, 227, 130, 135, 192, 143, 20, 1, 160, 0, 255, 100, 227, 130, 135], [224, 161, 17, 44, 145, 1, 39, 177, 155, 38, 148, 224, 65, 0, 187, 108, 187, 168, 224, 66, 16, 44, 177, 4, 18, 171, 173, 31, 42, 224, 97, 1, 143, 120, 56, 74, 224, 99, 3, 33, 123, 0, 150, 224, 65, 2, 151, 13, 181, 70], [224, 102, 5, 81, 42, 20, 2, 224, 65, 4, 162, 168, 214, 175], [192, 79, 22, 1, 128, 0, 255, 80, 232, 231, 212, 192, 79, 22, 1, 128, 0, 255, 80, 232, 231, 212, 192, 79, 22, 1, 128, 0, 255, 80, 232, 231, 212, 192, 79, 22, 1, 128, 0, 255, 80, 232, 231, 212], [192, 79, 24, 1, 128, 0, 255, 49, 86, 215, 107, 192, 79, 24, 1, 128, 0, 255, 49, 86, 215, 107, 192, 79, 24, 1, 128, 0, 255, 49, 86, 215, 107, 192, 79, 24, 1, 128, 0, 255, 49, 86, 215, 107], [192, 79, 26, 1, 128, 0, 255, 81, 5, 23, 17, 192, 79, 26, 1, 128, 0, 255, 81, 5, 23, 17, 192, 79, 26, 1, 128, 0, 255, 81, 5, 23, 17, 192, 79, 26, 1, 128, 0, 255, 81, 5, 23, 17], [192, 79, 28, 1, 128, 0, 255, 241, 240, 87, 158, 192, 79, 28, 1, 128, 0, 255, 241, 240, 87, 158, 192, 79, 28, 1, 128, 0, 255, 241, 240, 87, 158, 192, 79, 28, 1, 128, 0, 255, 241, 240, 87, 158], [192, 79, 30, 1, 128, 0, 255, 145, 163, 151, 228, 192, 79, 30, 1, 128, 0, 255, 145, 163, 151, 228, 192, 79, 30, 1, 128, 0, 255, 145, 163, 151, 228, 192, 79, 30, 1, 128, 0, 255, 145, 163, 151, 228], [192, 79, 16, 1, 128, 0, 255, 240, 29, 167, 91, 192, 79, 16, 1, 128, 0, 255, 240, 29, 167, 91, 192, 79, 16, 1, 128, 0, 255, 240, 29, 167, 91, 192, 79, 16, 1, 128, 0, 255, 240, 29, 167, 91], [192, 79, 18, 1, 128, 0, 255, 144, 78, 103, 33, 192, 79, 18, 1, 128, 0, 255, 144, 78, 103, 33, 192, 79, 18, 1, 128, 0, 255, 144, 78, 103, 33, 192, 79, 18, 1, 128, 0, 255, 144, 78, 103, 33], [192, 79, 20, 1, 128, 0, 255, 48, 187, 39, 174, 192, 79, 20, 1, 128, 0, 255, 48, 187, 39, 174, 192, 79, 20, 1, 128, 0, 255, 48, 187, 39, 174, 192, 79, 20, 1, 128, 0, 255, 48, 187, 39, 174], [192, 79, 22, 1, 128, 0, 255, 80, 232, 231, 212, 192, 79, 22, 1, 128, 0, 255, 80, 232, 231, 212, 192, 79, 22, 1, 128, 0, 255, 80, 232, 231, 212, 192, 79, 22, 1, 128, 0, 255, 80, 232, 231, 212], [192, 79, 24, 1, 128, 0, 255, 49, 86, 215, 107, 192, 79, 24, 1, 128, 0, 255, 49, 86, 215, 107, 192, 79, 24, 1, 128, 0, 255, 49, 86, 215, 107, 192, 79, 24, 1, 128, 0, 255, 49, 86, 215, 107], [192, 79, 26, 1, 128, 0, 255, 81, 5, 23, 17, 192, 79, 26, 1, 128, 0, 255, 81, 5, 23, 17, 192, 79, 26, 1, 128, 0, 255, 81, 5, 23, 17, 192, 79, 26, 1, 128, 0, 255, 81, 5, 23, 17], [192, 79, 28, 1, 128, 0, 255, 241, 240, 87, 158, 192, 79, 28, 1, 128, 0, 255, 241, 240, 87, 158, 192, 79, 28, 1, 128, 0, 255, 241, 240, 87, 158, 192, 79, 28, 1, 128, 0, 255, 241, 240, 87, 158], [192, 79, 30, 1, 128, 0, 255, 145, 163, 151, 228, 192, 79, 30, 1, 128, 0, 255, 145, 163, 151, 228, 192, 79, 30, 1, 128, 0, 255, 145, 163, 151, 228, 192, 79, 30, 1, 128, 0, 255, 145, 163, 151, 228], [192, 79, 16, 1, 128, 0, 255, 240, 29, 167, 91, 192, 79, 16, 1, 128, 0, 255, 240, 29, 167, 91, 192, 79, 16, 1, 128, 0, 255, 240, 29, 167, 91, 192, 79, 16, 1, 128, 0, 255, 240, 29, 167, 91], [192, 79, 18, 1, 128, 0, 255, 144, 78, 103, 33, 192, 79, 18, 1, 128, 0, 255, 144, 78, 103, 33, 192, 79, 18, 1, 128, 0, 255, 144, 78, 103, 33, 192, 79, 18, 1, 128, 0, 255, 144, 78, 103, 33], [192, 79, 20, 1, 128, 0, 255, 48, 187, 39, 174, 192, 79, 20, 1, 128, 0, 255, 48, 187, 39, 174, 192, 79, 20, 1, 128, 0, 255, 48, 187, 39, 174, 192, 79, 20, 1, 128, 0, 255, 48, 187, 39, 174], [192, 79, 22, 1, 128, 0, 255, 80, 232, 231, 212, 192, 79, 22, 1, 128, 0, 255, 80, 232, 231, 212, 192, 79, 22, 1, 128, 0, 255, 80, 232, 231, 212, 192, 79, 22, 1, 128, 0, 255, 80, 232, 231, 212], [224, 111, 23, 1, 128, 0, 255, 214, 196, 43, 238, 224, 65, 6, 142, 201, 216, 65, 224, 79, 82, 65, 128, 0, 255, 164, 37, 0, 44, 0, 0, 0, 0, 1, 0, 0, 0, 11, 0, 0, 17, 49, 174, 102, 75, 224, 97, 3, 163, 25, 54, 164, 224, 111, 25, 2, 128, 0, 255, 89, 213, 174, 67, 224, 65, 8, 137, 228, 96, 166, 224, 79, 52, 66, 128, 0, 255, 164, 37, 1, 255, 0, 0, 0, 0, 166, 70, 26, 81, 224, 97, 5, 150, 188, 85, 77, 224, 111, 27, 3, 128, 1, 255, 29, 208, 201, 152, 224, 65, 10, 165, 133, 110, 72, 224, 79, 38, 67, 128, 1, 255, 5, 12, 0, 0, 241, 253, 40, 109, 224, 97, 7, 186, 221, 91, 163, 224, 111, 29, 4, 129, 1, 255, 51, 119, 156, 139, 224, 65, 12, 144, 32, 13, 161, 224, 79, 24, 68, 129, 1, 255, 72, 165, 196, 223, 224, 97, 9, 189, 240, 227, 68, 224, 111, 47, 16, 129, 1, 255, 1, 0, 0, 0, 216, 217, 112, 117, 224, 65, 14, 188, 65, 3, 79, 224, 79, 42, 80, 129, 1, 255, 26, 0, 0, 0, 52, 141, 63, 222, 224, 97, 11, 145, 145, 237, 170, 224, 111, 33, 17, 129, 1, 255, 6, 8, 0, 0, 213, 107, 220, 226, 224, 65, 0, 187, 108, 187, 168], [224, 79, 28, 81, 129, 1, 255, 37, 164, 131, 77, 224, 97, 13, 164, 52, 142, 67]]
 packets2 = [[224, 33, 1, 138, 55, 65, 186, 224, 163, 3, 111, 172, 250, 93, 224, 166, 5, 31, 253, 238, 201, 0, 224, 0, 33, 1, 1, 138, 55, 0, 65, 186]]
 packets_pos = [ 0,0 ] # hoot-hoot,,, hewwo ;-P
+
+def record_flow():
+  while True:
+    if rxb_state()[0] == 0:
+        print(get_buffer_fast())
+        #print(get_rxb(80))
+        #print(get_message())
+    sleep(0.001)
 
 def get_buffer_fast():
     packet = []
@@ -577,100 +714,22 @@ def get_buffer_fast():
     packets.append(packet)
     return packet
 
-header_starts = [0xe0, 0xc0]
+def gb():
+    fun = postfactum_readout if listen else get_rxb
+    return show_msg(get_message(fun))
 
-def get_message(get_rxb=get_rxb):
-    header = 0
-    d = {}
-    # we might have to get through some message data!
-    while header not in header_starts:
-        header = get_rxb(1)[0]
-        if header == 0:
-            return
-        if header not in header_starts:
-            # this will be printed, eventually.
-            # the aim is that it doesn't delay code in the way that print() seems to
-            sys.stdout.write("disc {}\n".format(hex(header)))
-    d["o"] = False # incoming message
-    d["h"] = header
-    b1, b0 = get_rxb(2)
-    d["b0"] = b0
-    d["b1"] = b1
-    sop = 1 if header == 0xe0 else 0
-    d["st"] = sop
-    # parsing the packet header
-    prole = b0 & 1
-    d["pr"] = prole
-    drole = b1 >> 5 & 1
-    d["dr"] = drole
-    msg_type = b1 & 0b11111
-    pdo_count = (b0 >> 4) & 0b111
-    d["dc"] = pdo_count
-    d["t"] = msg_type
-    d["c"] = pdo_count == 0 # control if True else data
-    msg_index = int((b0 >> 1) & 0b111)
-    d["i"] = msg_index
-    if pdo_count:
-        read_len = pdo_count*4
-        pdos = get_rxb(read_len)
-        d["d"] = pdos
-    _ = get_rxb(4) # crc
-    rev = b1 >> 6
-    d["r"] = rev
-    is_ext = b0 >> 7 # extended
-    d["e"] = is_ext
-    msg_types = control_message_types if pdo_count == 0 else data_message_types
-    msg_name = msg_types[d["t"]]
-    d["tn"] = msg_name
-    if msg_name == "Vendor_Defined":
-        parse_vdm(d)
-    return d
-
-def show_msg(d):
-    ## d["h"] = header
-    ## sop = 1 if header == 0xe0 else 0
-    ## d["st"] = sop
-    sop_str = "" if d["st"] else "'"
-    # parsing the packet header
-    ## d["pr"] = prole
-    prole_str = "NC"[d["pr"]] if d["st"] else "R"
-    drole_str = "UD"[d["dr"]] if d["st"] else "R"
-    ## d["dc"] = pdo_count
-    ## d["t"] = msg_type
-    ## d["c"] = pdo_count == 0 # control if True else data
-    message_types = control_message_types if d["c"]  else data_message_types
-    ## d["i"] = msg_index
-    msg_type_str = message_types[d["t"]] if d["t"] < len(message_types) else "Reserved"
-    ## if pdo_count:
-    ##    d["d"] = pdos
-    ## d["r"] = rev
-    rev_str = "123"[d["r"]]
-    ## d["e"] = is_ext
-    ext_str = ["std", "ext"][d["e"]]
-    # msg direction
-    dir_str = ">" if d["o"] else "<"
-    if d["dc"]:
-        # converting "41 80 00 FF A4 25 00 2C" to "FF008041 2C0025A4"
-        pdo_strs = []
-        pdo_data = myhex(d["d"]).split(' ')
-        for i in range(len(pdo_data)//4):
-           pdo_strs.append(''.join(reversed(pdo_data[(i*4):][:4])))
-        pdo_str = " ".join(pdo_strs)
-    else:
-        pdo_str = ""
-    sys.stdout.write("{} {}{}: {}; p{} d{} r{}, {}, p{}, {} {}\n".format(dir_str, d["i"], sop_str, msg_type_str, prole_str, drole_str, rev_str, ext_str, d["dc"], myhex((d["b0"], d["b1"])).replace(' ', ''), pdo_str))
-    # extra parsing where possible
-    if msg_type_str == "Vendor_Defined":
-        print_vdm(d)
-        #sys.stdout.write(str(d["d"]))
-        #sys.stdout.write('\n')
-    elif msg_type_str == "Source_Capabilities":
-        sys.stdout.write(str(get_pdos(d)))
-        sys.stdout.write('\n')
-    return d
+def gba():
+    # not quite working well atm, sowwy (also, mood)
+    while True:
+      try:
+        gb(); print()
+      except Exception as e:
+        raise e
+        break
 
 def postfactum_readout(length=80):
     # A function that helps read data out of our own capture buffer instead of using the FUSB's internal buffer
+    # so, it pretends to be the FUSB FIFO read function, for parsing packets that are recorded into `packets`
     err = 0
     response = []
     while len(response) < length:
@@ -711,100 +770,31 @@ def postfactum_readout(length=80):
 
 ########################
 #
-# Packet capture code
+# Helper functions
 #
 ########################
 
-def record_flow():
-  while True:
-    if rxb_state()[0] == 0:
-        print(get_buffer_fast())
-        #print(get_rxb(80))
-        #print(get_message())
-    sleep(0.001)
+def myhex(b, j=" "):
+    l = []
+    for e in b:
+        e = hex(e)[2:].upper()
+        if len(e) < 2:
+            e = ("0"*(2-len(e)))+e
+        l.append(e)
+    return j.join(l)
 
-def gb():
-    fun = postfactum_readout if listen else get_rxb
-    return show_msg(get_message(fun))
-
-def gba():
-    # not quite working well atm, sowwy (also, mood)
-    while True:
-      try:
-        gb(); print()
-      except Exception as e:
-        raise e
-        break
-
-def request_fixed_pdo(num, current, max_current):
-    pdo = [0 for i in range(4)]
-
-    max_current_b = max_current // 10
-    max_current_l = max_current_b & 0xff
-    max_current_h = max_current_b >> 8
-    pdo[0] = max_current_l
-    pdo[1] |= max_current_h
-
-    current_b = current // 10
-    current_l = current_b & 0x3f
-    current_h = current_b >> 6
-    pdo[1] |= current_l << 2
-    pdo[2] |= current_h
-
-    pdo[3] |= (num+1) << 4 # object position
-    pdo[3] |= 0b1 # no suspend
-
-    send_command(0b00010, pdo)
-
-def request_pps_pdo(num, voltage, current):
-    pdo = [0 for i in range(4)]
-
-    current = current // 50
-    pdo[0] = current & 0x7f
-
-    voltage = voltage // 20
-    voltage_l = (voltage & 0x7f)
-    voltage_h = (voltage >> 7) & 0x1f
-    pdo[1] |= voltage_l << 1
-    pdo[2] = voltage_h
-
-    pdo[3] |= (num+1) << 4 # object position
-    pdo[3] |= 0b1 # no suspend
-
-    send_command(0b00010, pdo)
-
-def send_command(command, data, msg_id=None, rev=0b10):
-    msg_id = increment_msg_id() if msg_id is None else msg_id
-    sop_seq = [0x12, 0x12, 0x12, 0x13, 0x80]
-    eop_seq = [0xff, 0x14, 0xfe, 0xa1]
-    obj_count = len(data) // 4
-
-    header = [0, 0] # hoot hoot !
-
-    header[0] |= rev << 6 # PD revision
-    header[0] |= (command & 0b11111)
-
-    header[1] |= (msg_id & 0b111) << 1 # message ID
-    header[1] |= obj_count << 4
-
-    message = header+data
-
-    sop_seq[4] |= len(message)
-
-    i2c.writeto_mem(0x22, 0x43, bytes(sop_seq) )
-    i2c.writeto_mem(0x22, 0x43, bytes(message) )
-    i2c.writeto_mem(0x22, 0x43, bytes(eop_seq) )
-
-    sent_messages.append(message)
-
-def soft_reset():
-    send_command(0b01101, [])
-    reset_msg_id()
-
+def mybin(b, j=" "):
+    l = []
+    for e in b:
+        e = bin(e)[2:].upper()
+        if len(e) < 8:
+            e = ("0"*(8-len(e)))+e
+        l.append(e)
+    return j.join(l)
 
 ########################
 #
-# Main loop selection code
+# Main loop and mode selection code
 #
 ########################
 
