@@ -247,7 +247,7 @@ def sink_flow():
             pdos = get_pdos(d)
             pdo_i, current = select_pdo(pdos)
             # sending a message, need to increment message id
-            request_pdo(pdo_i, current, current)
+            request_fixed_pdo(pdo_i, current, current)
             # print("PDO requested!")
             pdo_requested = True
             sys.stdout.write(str(pdos))
@@ -333,11 +333,14 @@ def parse_vdm(d):
 #
 ########################
 
-def select_pdo_for_resistance(pdos, resistance = 8):
+expected_resistance = 8
+
+def select_pdo_for_resistance(pdos, resistance = None):
     # finding a PDO with maximum extractable power
     # for a given static resistance,
     # while making sure that we don't overcurrent the PSU
     # calculation storage lists
+    if resistance is None: resistance = expected_resistance
     power_levels = []
     currents = []
     for pdo in pdos:
@@ -659,9 +662,7 @@ def gba():
       except:
         break
 
-def request_pdo(num, current, max_current):
-    sop_seq = [0x12, 0x12, 0x12, 0x13, 0x80]
-    eop_seq = [0xff, 0x14, 0xfe, 0xa1]
+def request_fixed_pdo(num, current, max_current):
     pdo = [0 for i in range(4)]
 
     max_current_b = max_current // 10
@@ -675,6 +676,23 @@ def request_pdo(num, current, max_current):
     current_h = current_b >> 6
     pdo[1] |= current_l << 2
     pdo[2] |= current_h
+
+    pdo[3] |= (num+1) << 4 # object position
+    pdo[3] |= 0b1 # no suspend
+
+    send_command(0b00010, pdo)
+
+def request_pps_pdo(num, voltage, current):
+    pdo = [0 for i in range(4)]
+
+    current = current // 50
+    pdo[0] = current & 0x7f
+
+    voltage = voltage // 20
+    voltage_l = (voltage & 0x7f)
+    voltage_h = (voltage >> 7) & 0x1f
+    pdo[1] |= voltage_l << 1
+    pdo[2] = voltage_h
 
     pdo[3] |= (num+1) << 4 # object position
     pdo[3] |= 0b1 # no suspend
