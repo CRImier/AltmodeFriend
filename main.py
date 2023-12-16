@@ -279,7 +279,7 @@ def enable_sop():
 
 def disable_pulldowns():
     x = i2c.readfrom_mem(FUSB302B_ADDR, FUSB_SWITCHES0, 1)[0]
-    clear_mask = ~(FUSB_SWITCHES0_MEAS_CC1 | FUSB_SWITCHES0_MEAS_CC2) & 0xFF
+    clear_mask = ~(FUSB_SWITCHES0_PDWN_1 | FUSB_SWITCHES0_PDWN_2) & 0xFF
     x &= clear_mask
     i2c.writeto_mem(FUSB302B_ADDR, FUSB_SWITCHES0, bytes((x,)) )
 
