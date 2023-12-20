@@ -90,35 +90,58 @@ def set_power_rail(rail):
 #
 ########################
 
+FUSB302_I2C_SLAVE_ADDR = 0x22
+TCPC_REG_DEVICE_ID = 0x01
+TCPC_REG_SWITCHES0 = 0x02
+TCPC_REG_SWITCHES1 = 0x03
+TCPC_REG_MEASURE = 0x04
+TCPC_REG_CONTROL0 = 0x06
+TCPC_REG_CONTROL1 = 0x07
+TCPC_REG_CONTROL2 = 0x08
+TCPC_REG_CONTROL3 = 0x09
+TCPC_REG_MASK = 0x0A
+TCPC_REG_POWER = 0x0B
+TCPC_REG_RESET = 0x0C
+TCPC_REG_MASKA = 0x0E
+TCPC_REG_MASKB = 0x0F
+TCPC_REG_STATUS0A = 0x3C
+TCPC_REG_STATUS1A = 0x3D
+TCPC_REG_INTERRUPTA = 0x3E
+TCPC_REG_INTERRUPTB = 0x3F
+TCPC_REG_STATUS0 = 0x40
+TCPC_REG_STATUS1 = 0x41
+TCPC_REG_INTERRUPT = 0x42
+TCPC_REG_FIFOS = 0x43
+
 def reset():
     # reset the entire FUSB
-    i2c.writeto_mem(0x22, 0xc, bytes([0b1]))
+    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_RESET, bytes([0b1]))
 
 def reset_pd():
     # resets the FUSB PD logic
-    i2c.writeto_mem(0x22, 0xc, bytes([0b10]))
+    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_RESET, bytes([0b10]))
 
 def unmask_all():
     # unmasks all interrupts
-    i2c.writeto_mem(0x22, 0xa, bytes([0b0]))
-    i2c.writeto_mem(0x22, 0xe, bytes([0b0]))
-    i2c.writeto_mem(0x22, 0xf, bytes([0b0]))
+    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_MASK, bytes([0b0]))
+    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_MASKA, bytes([0b0]))
+    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_MASKB, bytes([0b0]))
 
 def cc_current():
     # show measured CC level interpreted as USB-C current levels
-    return i2c.readfrom_mem(0x22, 0x40, 1)[0] & 0b11
+    return i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_STATUS0, 1)[0] & 0b11
 
 def read_cc(cc):
     # enable a CC pin for reading
     assert(cc in [0, 1, 2])
-    x = i2c.readfrom_mem(0x22, 0x02, 1)[0]
+    x = i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_SWITCHES0, 1)[0]
     x1 = x
     clear_mask = ~0b1100 & 0xFF
     x &= clear_mask
     mask = [0b0, 0b100, 0b1000][cc]
     x |= mask
-    #print('rc', bin(x1), bin(x), cc)
-    i2c.writeto_mem(0x22, 0x02, bytes((x,)) )
+    #print('TCPC_REG_SWITCHES0: ', bin(x1), bin(x), cc)
+    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_SWITCHES0, bytes((x,)) )
 
 def enable_pullups():
     # enable host pullups on CC pins, disable pulldowns
@@ -134,16 +157,16 @@ def set_mdac(value):
 
 def enable_sop():
     # enable reception of SOP'/SOP" messages
-    x = i2c.readfrom_mem(0x22, 0x07, 1)[0]
+    x = i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_CONTROL1, 1)[0]
     mask = 0b1100011
     x |= mask
-    i2c.writeto_mem(0x22, 0x07, bytes((x,)) )
+    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_CONTROL1, bytes((x,)) )
 
 def disable_pulldowns():
-    x = i2c.readfrom_mem(0x22, 0x02, 1)[0]
+    x = i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_SWITCHES0, 1)[0]
     clear_mask = ~0b11 & 0xFF
     x &= clear_mask
-    i2c.writeto_mem(0x22, 0x02, bytes((x,)) )
+    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_SWITCHES0, bytes((x,)) )
 
 def measure_sink(debug=False):
     # read CC pins and see which one senses the pullup
@@ -180,10 +203,10 @@ def measure_source(debug=False):
 def set_controls_sink():
     # boot: 0b00100100
     ctrl0 = 0b00000000 # unmask all interrupts; don't autostart TX.. disable pullup current
-    i2c.writeto_mem(0x22, 0x06, bytes((ctrl0,)) )
+    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_CONTROL0, bytes((ctrl0,)) )
     # boot: 0b00000110
     ctrl3 = 0b00000111 # enable automatic packet retries
-    i2c.writeto_mem(0x22, 0x09, bytes((ctrl3,)) )
+    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_CONTROL3, bytes((ctrl3,)) )
 
 host_current=0b10
 
@@ -191,13 +214,14 @@ def set_controls_source():
     # boot: 0b00100100
     ctrl0 = 0b00000000 # unmask all interrupts; don't autostart TX
     ctrl0 |= host_current << 2 # set host current advertisement pullups
+    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_CONTROL0, bytes((ctrl0,)) )
     i2c.writeto_mem(0x22, 0x06, bytes((ctrl0,)) )
     # boot: 0b00000110
     ctrl3 = 0b00000110 # no automatic packet retries
-    i2c.writeto_mem(0x22, 0x09, bytes((ctrl3,)) )
+    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_CONTROL3, bytes((ctrl3,)) )
     # boot: 0b00000010
     #ctrl2 = 0b00000000 # disable DRP toggle. setting it to Do Not Use o_o ???
-    #i2c.writeto_mem(0x22, 0x08, bytes((ctrl2,)) )
+    #i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_CONTROL2, bytes((ctrl2,)) )
 
 def set_wake(state):
     # boot: 0b00000010
@@ -209,20 +233,20 @@ def set_wake(state):
     i2c.writeto_mem(0x22, 0x08, bytes((ctrl2,)) )
 
 def flush_receive():
-    x = i2c.readfrom_mem(0x22, 0x07, 1)[0]
+    x = i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_CONTROL1, 1)[0]
     mask = 0b100 # flush receive
     x |= mask
-    i2c.writeto_mem(0x22, 0x07, bytes((x,)) )
+    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_CONTROL1, bytes((x,)) )
 
 def flush_transmit():
-    x = i2c.readfrom_mem(0x22, 0x06, 1)[0]
+    x = i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_CONTROL0, 1)[0]
     mask = 0b01000000 # flush transmit
     x |= mask
-    i2c.writeto_mem(0x22, 0x06, bytes((x,)) )
+    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_CONTROL0, bytes((x,)) )
 
 def enable_tx(cc):
     # enables switch on either CC1 or CC2
-    x = i2c.readfrom_mem(0x22, 0x03, 1)[0]
+    x = i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_SWITCHES1, 1)[0]
     x1 = x
     mask = 0b10 if cc == 2 else 0b1
     x &= 0b10011100 # clearing both TX bits and revision bits
@@ -230,7 +254,7 @@ def enable_tx(cc):
     x |= 0b100
     x |= 0b10 << 5 # revision 3.0
     #print('et', bin(x1), bin(x), cc)
-    i2c.writeto_mem(0x22, 0x03, bytes((x,)) )
+    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_SWITCHES1, bytes((x,)) )
 
 def set_roles(power_role = 0, data_role = 0):
     x = i2c.readfrom_mem(0x22, 0x03, 1)[0]
@@ -241,45 +265,45 @@ def set_roles(power_role = 0, data_role = 0):
 
 def power():
     # enables all power circuits
-    x = i2c.readfrom_mem(0x22, 0x0b, 1)[0]
+    x = i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_POWER, 1)[0]
     mask = 0b1111
     x |= mask
-    i2c.writeto_mem(0x22, 0x0b, bytes((x,)) )
+    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_POWER, bytes((x,)) )
 
 def polarity():
     # reads polarity and role bits from STATUS1A
-    return (i2c.readfrom_mem(0x22, 0x3d, 1)[0] >> 3) & 0b111
+    return (i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_STATUS1A, 1)[0] >> 3) & 0b111
     #'0b110001'
 
 def interrupts():
     # return all interrupt registers
-    return i2c.readfrom_mem(0x22, 0x3e, 2)+i2c.readfrom_mem(0x22, 0x42, 1)
+    return i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_INTERRUPTA, 2)+i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_INTERRUPT, 1)
 
 # interrupts are cleared just by reading them, it seems
 #def clear_interrupts():
 #    # clear interrupt
-#    i2c.writeto_mem(0x22, 0x3e, bytes([0]))
-#    i2c.writeto_mem(0x22, 0x42, bytes([0]))
+#    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_INTERRUPTA, bytes([0]))
+#    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_INTERRUPT, bytes([0]))
 
 # this is a way better way to do things than the following function -
 # the read loop should be ported to this function, and the next ome deleted
 def rxb_state():
     # get read buffer interrupt states - (rx buffer empty, rx buffer full)
-    st = i2c.readfrom_mem(0x22, 0x41, 1)[0]
+    st = i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_STATUS1, 1)[0]
     return ((st & 0b100000) >> 5, (st & 0b10000) >> 4)
 
 # TODO: yeet
 def rxb_state():
-    st = i2c.readfrom_mem(0x22, 0x41, 1)[0]
+    st = i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_STATUS1, 1)[0]
     return ((st & 0b110000) >> 4, (st & 0b11000000) >> 6)
 
 def get_rxb(l=80):
     # read from FIFO
-    return i2c.readfrom_mem(0x22, 0x43, l)
+    return i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_FIFOS, l)
 
 def hard_reset():
-    i2c.writeto_mem(0x22, 0x09, bytes([0b1000000]))
-    return i2c.readfrom_mem(0x22, 0x09, 1)
+    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_CONTROL3, bytes([0b1000000]))
+    return i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_CONTROL3, 1)
 
 def find_cc(fn=measure_sink, debug=False):
     cc = fn(debug=debug)
@@ -766,9 +790,9 @@ def send_command(command, data, msg_id=None, rev=0b10, power_role=0, data_role=0
 
     sop_seq[4] |= len(message)
 
-    i2c.writeto_mem(0x22, 0x43, bytes(sop_seq) )
-    i2c.writeto_mem(0x22, 0x43, bytes(message) )
-    i2c.writeto_mem(0x22, 0x43, bytes(eop_seq) )
+    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_FIFOS, bytes(sop_seq) )
+    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_FIFOS, bytes(message) )
+    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_FIFOS, bytes(eop_seq) )
 
     sent_messages.append(message)
 
