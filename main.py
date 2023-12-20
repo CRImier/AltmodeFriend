@@ -2,6 +2,23 @@ from machine import Pin, I2C, ADC
 from time import sleep, ticks_us, ticks_diff
 import sys
 
+is_source = True
+
+if is_source:
+    # non-documented hardware stuff.
+    # This is starting to get to the point that things need to be pulled out into a separate library.
+    # glad I've gotten to that point ^~^
+    p_5_a = Pin(2, Pin.OUT, value=0)
+    p_5_m = Pin(7, Pin.OUT, value=0)
+    p_vin = Pin(3, Pin.OUT, value=0)
+    p_discharge = Pin(6, Pin.OUT, value=0)
+    p_5_m.off()
+    p_5_a.off()
+    p_vin.off()
+    p_discharge.on()
+    p_led_1 = Pin(9, Pin.OUT, value=0)
+    p_led_2 = Pin(15, Pin.OUT, value=0)
+
 i2c = I2C(sda=Pin(18), scl=Pin(19), id=1, freq=400000)
 print(i2c.scan())
 
@@ -15,6 +32,57 @@ def get_adc_vbus():
     return (3.3*11*a.read_u16())/65536
 
 print(get_adc_vbus(), "V")
+
+if is_source:
+    # sanity check
+    # currently, both 5V and VIN pins are supposed to be shut off
+    vbus_v = get_adc_vbus()
+    if vbus_v > 1:
+        # enable discharge FET and wait for VBUS to discharge
+        print("VBUS is at {}, has to be discharged".format(vbus_v))
+        p_discharge.on()
+        sleep(0.3)
+        vbus_v = get_adc_vbus()
+        if vbus_v > 1:
+            # blink and enter error state
+            # maybe a FET is borked, maybe something else
+            ## remove all pullups and pulldowns? TODO
+            print("VBUS is still at {}, can't be discharged".format(vbus_v))
+            while True:
+                p_led_1.toggle()
+                sleep(0.3)
+                # infinite loop; TODO: add checks in case of longer discharge
+    else:
+        print("VBUS is at {}".format(vbus_v))
+
+def set_power_rail(rail):
+    rail = rail.lower()
+    p_led_1.off(); p_led_2.off()
+    if rail == "off":
+        p_5_m.off()
+        p_5_a.off()
+        p_vin.off()
+        p_discharge.on()
+    elif rail == "5v":
+        p_vin.off()
+        p_discharge.on()
+        p_5_a.on()
+        p_5_m.on()
+        p_discharge.off()
+    elif rail == "vin":
+        p_5_m.off()
+        p_discharge.off()
+        p_5_a.on()
+        p_vin.on()
+        p_5_a.off()
+        p_led_1.on(); p_led_2.off()
+    else:
+        # catch-all:
+        p_5_m.off()
+        p_5_a.off()
+        p_vin.off()
+        p_discharge.on()
+        raise Exception("rail has to be one of 'off', '5v' or 'vin', was '{}'".format(rail))
 
 ########################
 #
@@ -260,15 +328,39 @@ def cc_current():
 
 def read_cc(cc):
     # enable a CC pin for reading
-    assert(cc in [1, 2])
+    assert(cc in [0, 1, 2])
     x = i2c.readfrom_mem(FUSB302B_ADDR, FUSB_SWITCHES0, 1)[0]
     x1 = x
     clear_mask = ~(FUSB_SWITCHES0_MEAS_CC1 | FUSB_SWITCHES0_MEAS_CC2) & 0xFF
     x &= clear_mask
-    mask = FUSB_SWITCHES0_MEAS_CC2 if cc == 2 else FUSB_SWITCHES0_MEAS_CC1
+    mask = [0b0, FUSB_SWITCHES0_MEAS_CC1, FUSB_SWITCHES0_MEAS_CC2][cc]
     x |= mask
-    print('FUSB_SWITCHES0: ', bin(x1), bin(x), cc)
+    # sys.stdout.write('FUSB_SWITCHES0: ', bin(x1), bin(x), cc)
     i2c.writeto_mem(FUSB302B_ADDR, FUSB_SWITCHES0, bytes((x,)) )
+
+def enable_pullups():
+    # enable host pullups on CC pins, disable pulldowns
+    x = i2c.readfrom_mem(FUSB302B_ADDR, FUSB_SWITCHES0, 1)[0]
+    x |= (FUSB_SWITCHES0_PU_EN1 | FUSB_SWITCHES0_PU_EN2)
+    i2c.writeto_mem(FUSB302B_ADDR, 0x02, bytes((x,)) )
+
+def set_mdac(value):
+    x = i2c.readfrom_mem(FUSB302B_ADDR, FUSB_MEASURE, 1)[0]
+    x &= 0b11000000 # FIXME: this is a magic number
+    x |= value
+    i2c.writeto_mem(0x22, 0x04, bytes((x,)) )
+
+def enable_pullups():
+    # enable host pullups on CC pins, disable pulldowns
+    x = i2c.readfrom_mem(0x22, 0x02, 1)[0]
+    x |= 0b11000000
+    i2c.writeto_mem(0x22, 0x02, bytes((x,)) )
+
+def set_mdac(value):
+    x = i2c.readfrom_mem(0x22, 0x04, 1)[0]
+    x &= 0b11000000
+    x |= value
+    i2c.writeto_mem(0x22, 0x04, bytes((x,)) )
 
 def enable_sop():
     # enable reception of SOP'/SOP" messages
@@ -283,7 +375,7 @@ def disable_pulldowns():
     x &= clear_mask
     i2c.writeto_mem(FUSB302B_ADDR, FUSB_SWITCHES0, bytes((x,)) )
 
-def measure():
+def measure_sink(debug=False):
     # read CC pins and see which one senses the pullup
     read_cc(1)
     sleep(0.001)
@@ -291,23 +383,79 @@ def measure():
     read_cc(2)
     sleep(0.001)
     cc2_c = cc_current()
+    # picking the CC pin depending on which pin can detect a pullup
     cc = [1, 2][cc1_c < cc2_c]
-    #print('m', bin(cc1_c), bin(cc2_c), cc)
+    if debug: print('m', bin(cc1_c), bin(cc2_c), cc)
     if cc1_c == cc2_c:
         return 0
     return cc
 
-def set_controls():
+def measure_source(debug=False):
+    # read CC pins and see which one senses the correct host current
+    read_cc(1)
+    sleep(0.001)
+    cc1_c = cc_current()
+    read_cc(2)
+    sleep(0.001)
+    cc2_c = cc_current()
+    if cc1_c == host_current:
+        cc = 1
+    elif cc2_c == host_current:
+        cc = 2
+    else:
+        cc = 0
+    if debug: print('m', bin(cc1_c), bin(cc2_c), cc)
+    return cc
+
+def set_controls_sink():
     # boot: 0b00100100
-    #ctrl0 = 0b00001100 # unmask all interrupts; don't autostart TX.. set pullup current to 3A? TODO
     ctrl0 = 0b00000000 # unmask all interrupts; don't autostart TX.. disable pullup current
     i2c.writeto_mem(FUSB302B_ADDR, FUSB_CONTROL0, bytes((ctrl0,)) )
     # boot: 0b00000110
     ctrl3 = (FUSB_CONTROL3_AUTO_RETRY | FUSB_CONTROL3_N_RETRIES) # enable automatic packet retries
     i2c.writeto_mem(FUSB302B_ADDR, FUSB_CONTROL3, bytes((ctrl3,)) )
+
+host_current=0b10
+
+def set_controls_source():
+    # boot: 0b00100100
+    ctrl0 = 0b00000000 # unmask all interrupts; don't autostart TX
+    ctrl0 |= host_current << FUSB_CONTROL0_HOST_CUR_SHIFT # set host current advertisement pullups
+    i2c.writeto_mem(FUSB302B_ADDR, FUSB_CONTROL0, bytes((ctrl0,)) )
+    i2c.writeto_mem(FUSB302B_ADDR, FUSB_CONTROL0, bytes((ctrl0,)) )
+    # boot: 0b00000110
+    ctrl3 = (FUSB_CONTROL3_N_RETRIES) # no automatic packet retries
+    i2c.writeto_mem(FUSB302B_ADDR, FUSB_CONTROL3, bytes((ctrl3,)) )
     # boot: 0b00000010
     #ctrl2 = 0b00000000 # disable DRP toggle. setting it to Do Not Use o_o ???
     #i2c.writeto_mem(FUSB302B_ADDR, FUSB_CONTROL2, bytes((ctrl2,)) )
+
+def set_wake(state):
+    # boot: 0b00000010
+    ctrl2 = i2c.readfrom_mem(FUSB302B_ADDR, FUSB_CONTROL3, 1)[0]
+    clear_mask = ~(FUSB_CONTROL3_AUTO_SOFTRESET) & 0xFF
+    ctrl2 &= clear_mask
+    if state:
+        ctrl2 |= FUSB_CONTROL3_AUTO_SOFTRESET
+    i2c.writeto_mem(FUSB302B_ADDR, FUSB_CONTROL3, bytes((ctrl2,)) )
+
+def set_wake(state):
+    # boot: 0b00000010
+    ctrl2 = i2c.readfrom_mem(0x22, 0x08, 1)[0]
+    clear_mask = ~(1 << 3) & 0xFF
+    ctrl2 &= clear_mask
+    if state:
+        ctrl2 | (1 << 3)
+    i2c.writeto_mem(0x22, 0x08, bytes((ctrl2,)) )
+
+def set_wake(state):
+    # boot: 0b00000010
+    ctrl2 = i2c.readfrom_mem(0x22, 0x08, 1)[0]
+    clear_mask = ~(1 << 3) & 0xFF
+    ctrl2 &= clear_mask
+    if state:
+        ctrl2 | (1 << 3)
+    i2c.writeto_mem(0x22, 0x08, bytes((ctrl2,)) )
 
 def flush_receive():
     x = i2c.readfrom_mem(FUSB302B_ADDR, FUSB_CONTROL1, 1)[0]
@@ -330,8 +478,24 @@ def enable_tx(cc):
     x |= mask
     x |= (FUSB_SWITCHES1_AUTO_CRC)
     x |= (FUSB_SWITCHES1_SPECREV30) # revision 3.0
-    print('FUSB_SWITCHES1: ', bin(x1), bin(x), cc)
+    # sys.stdout.write('FUSB_SWITCHES1: ', bin(x1), bin(x), cc)
     i2c.writeto_mem(FUSB302B_ADDR, FUSB_SWITCHES1, bytes((x,)) )
+
+def set_roles(power_role = 0, data_role = 0):
+    x = i2c.readfrom_mem(FUSB302B_ADDR, FUSB_SWITCHES1, 1)[0]
+    x &= ~(FUSB_SWITCHES1_DATAROLE | FUSB_SWITCHES1_POWERROLE) # clearing both role bits
+    if power_role:
+        x |= FUSB_SWITCHES1_POWERROLE
+    if data_role: 
+        x |= FUSB_SWITCHES1_DATAROLE
+    i2c.writeto_mem(FUSB302B_ADDR, FUSB_SWITCHES1, bytes((x,)) )
+
+def set_roles(power_role = 0, data_role = 0):
+    x = i2c.readfrom_mem(0x22, 0x03, 1)[0]
+    x &= 0b01101111 # clearing both role bits
+    x |= power_role << 7
+    x |= data_role << 7
+    i2c.writeto_mem(0x22, 0x03, bytes((x,)) )
 
 def power():
     # enables all power circuits
@@ -374,8 +538,8 @@ def hard_reset():
     i2c.writeto_mem(FUSB302B_ADDR, FUSB_CONTROL3, bytes([FUSB_CONTROL3_SEND_HARD_RESET]))
     return i2c.readfrom_mem(FUSB302B_ADDR, FUSB_CONTROL3, 1)
 
-def find_cc():
-    cc = measure()
+def find_cc(fn=measure_sink, debug=False):
+    cc = fn(debug=debug)
     flush_receive()
     enable_tx(cc)
     read_cc(cc)
@@ -443,8 +607,95 @@ def reset_msg_id():
 
 sent_messages = []
 
+def source_flow():
+  global psu_advertisement, advertisement_counter, sent_messages
+  psu_advertisement = create_pdo('fixed', 5000, 1500, 0, 8) + \
+                       create_pdo('fixed', 19000, 5000, 0, 0)
+  counter = 0
+  reset_msg_id()
+  sleep(0.3)
+  print("sending advertisement")
+  send_advertisement(psu_advertisement)
+  advertisement_counter = 1
+  profile_selected = False
+  try:
+   timeout = 0.00001
+   while True:
+    if rxb_state()[0] == 0: # buffer non-empty
+        d = get_message()
+        msg_types = control_message_types if d["c"] else data_message_types
+        msg_name = msg_types[d["t"]]
+        # now we do things depending on the message type that we received
+        if msg_name == "GoodCRC": # example
+            print("GoodCRC")
+        elif msg_name == "Request":
+            profile_selected = True
+            process_psu_request(psu_advertisement, d)
+        """elif msg_name == "Source_Capabilities":
+            # need to request a PDO!
+            pdos = get_pdos(d)
+            pdo_i, current = select_pdo(pdos)
+            # sending a message, need to increment message id
+            request_fixed_pdo(pdo_i, current, current)
+            # print("PDO requested!")
+            pdo_requested = True
+            sys.stdout.write(str(pdos))
+            sys.stdout.write('\n')
+        elif msg_name in ["Accept", "PS_RDY"]:
+            print(get_adc_vbus(), "V")
+        elif msg_name == "Vendor_Defined":
+            parse_vdm(d)
+            react_vdm(d)"""
+        show_msg(d)
+    for message in sent_messages:
+        sys.stdout.write('> ')
+        sys.stdout.write(myhex(message))
+        sys.stdout.write('\n')
+    sent_messages = []
+    sleep(timeout) # so that ctrlc works
+    counter += 1
+    if counter == 10000:
+        counter = 0
+        if not profile_selected and advertisement_counter < 30:
+            print("sending advertisement")
+            send_advertisement(psu_advertisement)
+            advertisement_counter += 1
+    if int_g() == 0:
+        i = interrupts()
+        print(i)
+        i_reg = i[2]
+        if i_reg & 0x80: # I_VBUSOK
+            print("I_VBUSOK")
+            #pass # just a side effect of vbus being attached
+        if i_reg & 0x40: # I_ACTIVITY
+            print("I_ACTIVITY")
+            pass # just a side effect of CC comms I think?
+        if i_reg & 0x20: # I_COMP_CHNG
+            print("I_COMP_CHNG")
+            # this is where detach can occur, let's check
+            cc = find_cc(fn=measure_source)
+            if cc == 0:
+                print("Disconnect detected!")
+                return # we exiting this
+        if i_reg & 0x10: # I_CRC_CHK
+            pass # new CRC, just a side effect of CC comms
+        if i_reg & 0x8: # I_ALERT
+            print("I_ALERT")
+            x = i2c.readfrom_mem(0x22, 0x41, 1)[0]
+            print(bin(x))
+        if i_reg & 0x4: # I_WAKE
+            print("I_WAKE")
+        if i_reg & 0x2: # I_COLLISION
+            print("I_COLLISION")
+        if i_reg & 0x1: # I_BC_LVL
+            print("I_BC_LVL")
+  except KeyboardInterrupt:
+    print("CtrlC")
+    raise
+
 def sink_flow():
   global pdo_requested, pdos, sent_messages
+  reset_msg_id()
   try:
    timeout = 0.00001
    while True:
@@ -477,8 +728,32 @@ def sink_flow():
             sys.stdout.write('\n')
         sent_messages = []
     sleep(timeout) # so that ctrlc works
+    if int_g() == 0:
+        # needs sink detach processing here lmao
+        i = interrupts()
+        print(i)
+        i_reg = i[2]
+        if i_reg & 0x80: # I_VBUSOK
+            print("I_VBUSOK")
+            #pass # just a side effect of vbus being attached
+        if i_reg & 0x40: # I_ACTIVITY
+            print("I_ACTIVITY")
+            pass # just a side effect of CC comms I think?
+        if i_reg & 0x20: # I_COMP_CHNG
+            print("I_COMP_CHNG")
+        if i_reg & 0x10: # I_CRC_CHK
+            pass # new CRC, just a side effect of CC comms
+        if i_reg & 0x8: # I_ALERT
+            print("I_ALERT")
+        if i_reg & 0x4: # I_WAKE
+            print("I_WAKE")
+        if i_reg & 0x2: # I_COLLISION
+            print("I_COLLISION")
+        if i_reg & 0x1: # I_BC_LVL
+            print("I_BC_LVL")
   except KeyboardInterrupt:
     print("CtrlC")
+    return
 
 ########################
 #
@@ -665,6 +940,52 @@ def parse_pdo(pdo):
         max_current = max_current_b * 50
         return ('pps', pps_types[t], max_voltage, min_voltage, max_current, limited)
 
+def create_pdo(pdo_t, *args):
+    print(pdo_t, *args)
+    assert(pdo_t in pdo_types)
+    pdo = [0 for i in range(4)]
+    if pdo_t == 'fixed':
+        voltage, current, peak_current, pdo3 = args
+        current_v = current // 10
+        current_h = (current_v >> 8) & 0b11
+        current_l = current_v & 0xFF
+        pdo[1] = current_h
+        pdo[0] = current_l
+        """
+        current_h = pdo[1] & 0b11
+        current_b = ( current_h << 8 ) | pdo[0]
+        current = current_b * 10
+        """
+        voltage_v = voltage // 50
+        pdo[2] = (voltage_v >> 6) & 0b1111
+        pdo[1] |= (voltage_v & 0b111111) << 2
+        """
+        voltage_h = pdo[2] & 0b1111
+        voltage_b = ( voltage_h << 6 ) | (pdo[1] >> 2)
+        voltage = voltage_b * 50
+        """
+        pdo[2] |= (peak_current & 0b11) << 4
+        peak_current = (pdo[2] >> 4) & 0b11
+        pdo[3] = pdo3
+        pdo[3] |= pdo_types.index(pdo_t) << 6
+    elif pdo_t == 'batt':
+        raise Exception("Batt PDO formation not implemented yet!")
+    elif pdo_t == 'var':
+        raise Exception("Variable PDO formation not implemented yet!")
+    elif pdo_t == 'pps':
+        """t = (pdo[3] >> 4) & 0b11
+        limited = (pdo[3] >> 5) & 0b1
+        max_voltage_h = pdo[3] & 0b1
+        max_voltage_b = (max_voltage_h << 7) | pdo[2] >> 1
+        max_voltage = max_voltage_b * 100
+        min_voltage = pdo[1] * 100
+        max_current_b = pdo[0] & 0b1111111
+        max_current = max_current_b * 50
+        return ('pps', pps_types[t], max_voltage, min_voltage, max_current, limited)"""
+        raise Exception("PPS PDO formation not implemented yet!")
+    print(parse_pdo(bytes(pdo)))
+    return pdo
+
 def get_pdos(d):
     pdo_list = []
     pdos = d["d"]
@@ -682,7 +1003,7 @@ def get_pdos(d):
 #
 ########################
 
-def send_command(command, data, msg_id=None, rev=0b10):
+def send_command(command, data, msg_id=None, rev=0b10, power_role=0, data_role=0):
     msg_id = increment_msg_id() if msg_id is None else msg_id
     sop_seq = [0x12, 0x12, 0x12, 0x13, 0x80]
     eop_seq = [0xff, 0x14, 0xfe, 0xa1]
@@ -691,8 +1012,10 @@ def send_command(command, data, msg_id=None, rev=0b10):
     header = [0, 0] # hoot hoot !
 
     header[0] |= rev << 6 # PD revision
+    header[0] |= (data_role & 0b1) << 5 # PD revision
     header[0] |= (command & 0b11111)
 
+    header[1] = power_role & 0b1
     header[1] |= (msg_id & 0b111) << 1 # message ID
     header[1] |= obj_count << 4
 
@@ -709,6 +1032,32 @@ def send_command(command, data, msg_id=None, rev=0b10):
 def soft_reset():
     send_command(0b01101, [])
     reset_msg_id()
+
+########################
+#
+# PSU request processing code
+#
+########################
+
+def send_advertisement(psu_advertisement):
+    #data = [bytes(a) for a in psu_advertisement]
+    data = psu_advertisement
+    send_command(0b1, data, power_role=1, data_role=1)
+
+def process_psu_request(psu_advertisement, d):
+    print(d)
+    profile = ((d["d"][3] >> 4)&0b111)-1
+    print("Selected profile", profile)
+    if profile not in range(len(psu_advertisement)):
+        set_power_rail('off')
+    else:
+        send_command(0b11, [], power_role=1, data_role=1) # Accept
+        sleep(0.1)
+        if profile == 0:
+            set_power_rail('5V')
+        elif profile == 1:
+            set_power_rail('VIN')
+        send_command(0b110, [], power_role=1, data_role=1) # PS_RDY
 
 ########################
 #
@@ -778,6 +1127,8 @@ dp_commands = {
     0x11: "DP Configure"}
 
 vdm_cmd_types = ["REQ", "ACK", "NAK", "BUSY"]
+
+# reply-with-hardcoded code
 
 def react_vdm(d):
     if d["vdm_s"]:
@@ -1029,23 +1380,50 @@ def loop():
     reset()
     power()
     unmask_all()
-    set_controls()
+    if is_source:
+        set_controls_source()
+    else:
+        set_controls_sink()
 
     if listen:
         cc = 1
         flush_receive()
         disable_pulldowns()
+        sleep(0.2)
         read_cc(cc)
         enable_sop()
         flush_transmit()
         flush_receive()
         reset_pd()
         record_flow()
-    else:
-        cc = find_cc()
+    elif is_source:
+        set_roles(power_role=1)
+        set_power_rail('off')
+        disable_pulldowns()
+        set_wake(True)
+        enable_pullups()
+        set_mdac(0b111111)
+        cc = find_cc(fn=measure_source, debug=True)
+        while cc == 0:
+            cc = find_cc(fn=measure_source)
+        cc = find_cc(fn=measure_source, debug=True)
+        set_power_rail('5V')
+        source_flow()
+    else: # sink
+        set_roles()
+        set_wake(True)
+        set_mdac(0b111111)
+        cc = 0
+        cc = find_cc(fn=measure_sink, debug=True)
+        while cc == 0:
+            cc = find_cc(fn=measure_sink)
+        cc = find_cc(fn=measure_source, debug=True)
         sink_flow()
 
 #listen = 1; packets = packets1; gba()
-loop()
 
-
+while True:
+    try:
+        loop()
+    except KeyboardInterrupt:
+        sleep(1)
