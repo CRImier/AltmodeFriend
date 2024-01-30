@@ -2,7 +2,7 @@ from machine import Pin, I2C, ADC
 from time import sleep, ticks_us, ticks_diff
 import sys
 
-is_source = True
+is_source = False
 
 if is_source:
     # non-documented hardware stuff.
