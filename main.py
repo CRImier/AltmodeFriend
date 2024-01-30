@@ -458,6 +458,7 @@ def source_flow():
             print("I_BC_LVL")
   except KeyboardInterrupt:
     print("CtrlC")
+    sleep(1)
     raise
 
 def sink_flow():
@@ -520,7 +521,8 @@ def sink_flow():
             print("I_BC_LVL")
   except KeyboardInterrupt:
     print("CtrlC")
-    return
+    sleep(1)
+    raise
 
 ########################
 #
