@@ -168,6 +168,11 @@ def disable_pulldowns():
     x &= clear_mask
     i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_SWITCHES0, bytes((x,)) )
 
+def enable_pulldowns():
+    x = i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_SWITCHES0, 1)[0]
+    x |= 0b11
+    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_SWITCHES0, bytes((x,)) )
+
 def measure_sink(debug=False):
     # read CC pins and see which one senses the pullup
     read_cc(1)
