@@ -498,6 +498,10 @@ def sink_flow():
             pass # just a side effect of CC comms I think?
         if i_reg & 0x20: # I_COMP_CHNG
             print("I_COMP_CHNG")
+            cc = find_cc(fn=measure_sink)
+            if cc == 0:
+                print("Disconnect detected!")
+                return # we exiting this
         if i_reg & 0x10: # I_CRC_CHK
             pass # new CRC, just a side effect of CC comms
         if i_reg & 0x8: # I_ALERT
@@ -1170,7 +1174,7 @@ def loop():
     else: # sink
         set_roles()
         set_wake(True)
-        set_mdac(0b111111)
+        set_mdac(0b100)
         cc = 0
         cc = find_cc(fn=measure_sink, debug=True)
         while cc == 0:
