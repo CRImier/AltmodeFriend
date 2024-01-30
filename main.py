@@ -1184,7 +1184,7 @@ def loop():
         cc = find_cc(fn=measure_sink, debug=True)
         while cc == 0:
             cc = find_cc(fn=measure_sink)
-        cc = find_cc(fn=measure_source, debug=True)
+        cc = find_cc(fn=measure_sink, debug=True)
         sink_flow()
 
 #listen = 1; packets = packets1; gba()
