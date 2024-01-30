@@ -403,21 +403,6 @@ def source_flow():
         elif msg_name == "Request":
             profile_selected = True
             process_psu_request(psu_advertisement, d)
-        """elif msg_name == "Source_Capabilities":
-            # need to request a PDO!
-            pdos = get_pdos(d)
-            pdo_i, current = select_pdo(pdos)
-            # sending a message, need to increment message id
-            request_fixed_pdo(pdo_i, current, current)
-            # print("PDO requested!")
-            pdo_requested = True
-            sys.stdout.write(str(pdos))
-            sys.stdout.write('\n')
-        elif msg_name in ["Accept", "PS_RDY"]:
-            print(get_adc_vbus(), "V")
-        elif msg_name == "Vendor_Defined":
-            parse_vdm(d)
-            react_vdm(d)"""
         show_msg(d)
     for message in sent_messages:
         sys.stdout.write('> ')
@@ -507,8 +492,7 @@ def sink_flow():
         print(i)
         i_reg = i[2]
         if i_reg & 0x80: # I_VBUSOK
-            print("I_VBUSOK")
-            #pass # just a side effect of vbus being attached
+            pass # just a side effect of vbus being attached
         if i_reg & 0x40: # I_ACTIVITY
             print("I_ACTIVITY")
             pass # just a side effect of CC comms I think?
