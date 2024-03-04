@@ -90,58 +90,265 @@ def set_power_rail(rail):
 #
 ########################
 
-FUSB302_I2C_SLAVE_ADDR = 0x22
-TCPC_REG_DEVICE_ID = 0x01
-TCPC_REG_SWITCHES0 = 0x02
-TCPC_REG_SWITCHES1 = 0x03
-TCPC_REG_MEASURE = 0x04
-TCPC_REG_CONTROL0 = 0x06
-TCPC_REG_CONTROL1 = 0x07
-TCPC_REG_CONTROL2 = 0x08
-TCPC_REG_CONTROL3 = 0x09
-TCPC_REG_MASK = 0x0A
-TCPC_REG_POWER = 0x0B
-TCPC_REG_RESET = 0x0C
-TCPC_REG_MASKA = 0x0E
-TCPC_REG_MASKB = 0x0F
-TCPC_REG_STATUS0A = 0x3C
-TCPC_REG_STATUS1A = 0x3D
-TCPC_REG_INTERRUPTA = 0x3E
-TCPC_REG_INTERRUPTB = 0x3F
-TCPC_REG_STATUS0 = 0x40
-TCPC_REG_STATUS1 = 0x41
-TCPC_REG_INTERRUPT = 0x42
-TCPC_REG_FIFOS = 0x43
+_FUSB302B_ADDR = const(0x22)
+
+# Device ID register
+_FUSB_DEVICE_ID = const(0x01)
+_FUSB_DEVICE_ID_VERSION_ID_SHIFT = const(4)
+_FUSB_DEVICE_ID_VERSION_ID = const((0xF << _FUSB_DEVICE_ID_VERSION_ID_SHIFT))
+_FUSB_DEVICE_ID_PRODUCT_ID_SHIFT = const(2)
+_FUSB_DEVICE_ID_PRODUCT_ID = const((0x3 << _FUSB_DEVICE_ID_PRODUCT_ID_SHIFT))
+_FUSB_DEVICE_ID_REVISION_ID_SHIFT = const(0)
+_FUSB_DEVICE_ID_REVISION_ID = const((0x3 << _FUSB_DEVICE_ID_REVISION_ID_SHIFT))
+
+# Switches0 register
+_FUSB_SWITCHES0 = const(0x02)
+_FUSB_SWITCHES0_PU_EN2 = const((1 << 7))
+_FUSB_SWITCHES0_PU_EN1 = const((1 << 6))
+_FUSB_SWITCHES0_VCONN_CC2 = const((1 << 5))
+_FUSB_SWITCHES0_VCONN_CC1 = const((1 << 4))
+_FUSB_SWITCHES0_MEAS_CC2 = const((1 << 3))
+_FUSB_SWITCHES0_MEAS_CC1 = const((1 << 2))
+_FUSB_SWITCHES0_PDWN_2 = const((1 << 1))
+_FUSB_SWITCHES0_PDWN_1 = const(1)
+
+# Switches1 register
+_FUSB_SWITCHES1 = const(0x03)
+_FUSB_SWITCHES1_POWERROLE = const((1 << 7))
+_FUSB_SWITCHES1_SPECREV_SHIFT = const(5)
+_FUSB_SWITCHES1_SPECREV = const((0x3 << _FUSB_SWITCHES1_SPECREV_SHIFT))
+_FUSB_SWITCHES1_SPECREV30 = const(0b10 << _FUSB_SWITCHES1_SPECREV_SHIFT)
+_FUSB_SWITCHES1_DATAROLE = const((1 << 4))
+_FUSB_SWITCHES1_AUTO_CRC = const((1 << 2))
+_FUSB_SWITCHES1_TXCC2 = const((1 << 1))
+_FUSB_SWITCHES1_TXCC1 = const(1)
+
+# Measure register
+_FUSB_MEASURE = const(0x04)
+_FUSB_MEASURE_MEAS_VBUS = const((1 << 6))
+_FUSB_MEASURE_MDAC_SHIFT = const(0)
+_FUSB_MEASURE_MDAC = const((0x3F << _FUSB_MEASURE_MDAC_SHIFT))
+
+# Slice register
+_FUSB_SLICE = const(0x05)
+_FUSB_SLICE_SDAC_HYS_SHIFT = const(6)
+_FUSB_SLICE_SDAC_HYS = const((0x3 << _FUSB_SLICE_SDAC_HYS_SHIFT))
+_FUSB_SLICE_SDAC_SHIFT = const(0)
+_FUSB_SLICE_SDAC = const((0x3F << _FUSB_SLICE_SDAC_SHIFT))
+
+# Control0 register
+_FUSB_CONTROL0 = const(0x06)
+_FUSB_CONTROL0_TX_FLUSH = const((1 << 6))
+_FUSB_CONTROL0_INT_MASK = const((1 << 5))
+_FUSB_CONTROL0_HOST_CUR_SHIFT = const(2)
+_FUSB_CONTROL0_HOST_CUR = const((0x3 << _FUSB_CONTROL0_HOST_CUR_SHIFT))
+_FUSB_CONTROL0_AUTO_PRE = const((1 << 1))
+_FUSB_CONTROL0_TX_START = const(1)
+
+# Control1 register
+_FUSB_CONTROL1 = const(0x07)
+_FUSB_CONTROL1_ENSOP2DB = const((1 << 6))
+_FUSB_CONTROL1_ENSOP1DB = const((1 << 5))
+_FUSB_CONTROL1_BIST_MODE2 = const((1 << 4))
+_FUSB_CONTROL1_RX_FLUSH = const((1 << 2))
+_FUSB_CONTROL1_ENSOP2 = const((1 << 1))
+_FUSB_CONTROL1_ENSOP1 = const(1)
+
+# Control2 register
+_FUSB_CONTROL2 = const(0x08)
+_FUSB_CONTROL2_TOG_SAVE_PWR_SHIFT = const(6)
+# _FUSB_CONTROL2_TOG_SAVE_PWR = const((0x3 << _FUSB_CONTROL2_TOG_SAVE_PWR))
+_FUSB_CONTROL2_TOG_RD_ONLY = const((1 << 5))
+_FUSB_CONTROL2_WAKE_EN = const((1 << 3))
+_FUSB_CONTROL2_MODE_SHIFT = const(1)
+_FUSB_CONTROL2_MODE = const((0x3 << _FUSB_CONTROL2_MODE_SHIFT))
+_FUSB_CONTROL2_TOGGLE = const(1)
+
+# Control3 register
+_FUSB_CONTROL3 = const(0x09)
+_FUSB_CONTROL3_SEND_HARD_RESET = const((1 << 6))
+_FUSB_CONTROL3_BIST_TMODE = const((1 << 5))
+_FUSB_CONTROL3_AUTO_HARDRESET = const((1 << 4))
+_FUSB_CONTROL3_AUTO_SOFTRESET = const((1 << 3))
+_FUSB_CONTROL3_N_RETRIES_SHIFT = const(1)
+_FUSB_CONTROL3_N_RETRIES = const((0x3 << _FUSB_CONTROL3_N_RETRIES_SHIFT))
+_FUSB_CONTROL3_AUTO_RETRY = const(1)
+
+# Mask1 register
+_FUSB_MASK1 = const(0x0A)
+_FUSB_MASK1_M_VBUSOK = const((1 << 7))
+_FUSB_MASK1_M_ACTIVITY = const((1 << 6))
+_FUSB_MASK1_M_COMP_CHNG = const((1 << 5))
+_FUSB_MASK1_M_CRC_CHK = const((1 << 4))
+_FUSB_MASK1_M_ALERT = const((1 << 3))
+_FUSB_MASK1_M_WAKE = const((1 << 2))
+_FUSB_MASK1_M_COLLISION = const((1 << 1))
+_FUSB_MASK1_M_BC_LVL = const((1 << 0))
+
+# Power register
+_FUSB_POWER = const(0x0B)
+_FUSB_POWER_PWR3 = const((1 << 3))
+_FUSB_POWER_PWR2 = const((1 << 2))
+_FUSB_POWER_PWR1 = const((1 << 1))
+_FUSB_POWER_PWR0 = const(1)
+
+# Reset register
+_FUSB_RESET = const(0x0C)
+_FUSB_RESET_PD_RESET = const((1 << 1))
+_FUSB_RESET_SW_RES = const(1)
+
+# OCPreg register
+_FUSB_OCPREG = const(0x0D)
+_FUSB_OCPREG_OCP_RANGE = const((1 << 3))
+_FUSB_OCPREG_OCP_CUR_SHIFT = const(0)
+_FUSB_OCPREG_OCP_CUR = const((0x7 << _FUSB_OCPREG_OCP_CUR_SHIFT))
+
+# Maska register
+_FUSB_MASKA = const(0x0E)
+_FUSB_MASKA_M_OCP_TEMP = const((1 << 7))
+_FUSB_MASKA_M_TOGDONE = const((1 << 6))
+_FUSB_MASKA_M_SOFTFAIL = const((1 << 5))
+_FUSB_MASKA_M_RETRYFAIL = const((1 << 4))
+_FUSB_MASKA_M_HARDSENT = const((1 << 3))
+_FUSB_MASKA_M_TXSENT = const((1 << 2))
+_FUSB_MASKA_M_SOFTRST = const((1 << 1))
+_FUSB_MASKA_M_HARDRST = const(1)
+
+# Maskb register
+_FUSB_MASKB = const(0x0F)
+_FUSB_MASKB_M_GCRCSENT = const(1)
+
+# Control4 register
+_FUSB_CONTROL4 = const(0x10)
+_FUSB_CONTROL4_TOG_EXIT_AUD = const(1)
+
+# Status0a register
+_FUSB_STATUS0A = const(0x3C)
+_FUSB_STATUS0A_SOFTFAIL = const((1 << 5))
+_FUSB_STATUS0A_RETRYFAIL = const((1 << 4))
+_FUSB_STATUS0A_POWER3 = const((1 << 3))
+_FUSB_STATUS0A_POWER2 = const((1 << 2))
+_FUSB_STATUS0A_SOFTRST = const((1 << 1))
+_FUSB_STATUS0A_HARDRST = const(1)
+
+# Status1a register
+_FUSB_STATUS1A = const(0x3D)
+_FUSB_STATUS1A_TOGSS_SHIFT = const(3)
+_FUSB_STATUS1A_TOGSS = const((0x7 << _FUSB_STATUS1A_TOGSS_SHIFT))
+_FUSB_STATUS1A_RXSOP2DB = const((1 << 2))
+_FUSB_STATUS1A_RXSOP1DB = const((1 << 1))
+_FUSB_STATUS1A_RXSOP = const(1)
+
+# Interrupta register
+_FUSB_INTERRUPTA = const(0x3E)
+_FUSB_INTERRUPTA_I_OCP_TEMP = const((1 << 7))
+_FUSB_INTERRUPTA_I_TOGDONE = const((1 << 6))
+_FUSB_INTERRUPTA_I_SOFTFAIL = const((1 << 5))
+_FUSB_INTERRUPTA_I_RETRYFAIL = const((1 << 4))
+_FUSB_INTERRUPTA_I_HARDSENT = const((1 << 3))
+_FUSB_INTERRUPTA_I_TXSENT = const((1 << 2))
+_FUSB_INTERRUPTA_I_SOFTRST = const((1 << 1))
+_FUSB_INTERRUPTA_I_HARDRST = const(1)
+
+# Interruptb register
+_FUSB_INTERRUPTB = const(0x3F)
+_FUSB_INTERRUPTB_I_GCRCSENT = const(1)
+
+# Status0 register
+_FUSB_STATUS0 = const(0x40)
+_FUSB_STATUS0_VBUSOK = const((1 << 7))
+_FUSB_STATUS0_ACTIVITY = const((1 << 6))
+_FUSB_STATUS0_COMP = const((1 << 5))
+_FUSB_STATUS0_CRC_CHK = const((1 << 4))
+_FUSB_STATUS0_ALERT = const((1 << 3))
+_FUSB_STATUS0_WAKE = const((1 << 2))
+_FUSB_STATUS0_BC_LVL_SHIFT = const(0)
+_FUSB_STATUS0_BC_LVL = const((0x3 << _FUSB_STATUS0_BC_LVL_SHIFT))
+
+# Status1 register
+_FUSB_STATUS1 = const(0x41)
+_FUSB_STATUS1_RXSOP2 = const((1 << 7))
+_FUSB_STATUS1_RXSOP1 = const((1 << 6))
+_FUSB_STATUS1_RX_EMPTY = const((1 << 5))
+_FUSB_STATUS1_RX_FULL = const((1 << 4))
+_FUSB_STATUS1_TX_EMPTY = const((1 << 3))
+_FUSB_STATUS1_TX_FULL = const((1 << 2))
+_FUSB_STATUS1_OVRTEMP = const((1 << 1))
+_FUSB_STATUS1_OCP = const(1)
+
+# Interrupt register
+_FUSB_INTERRUPT = const(0x42)
+_FUSB_INTERRUPT_I_VBUSOK = const((1 << 7))
+_FUSB_INTERRUPT_I_ACTIVITY = const((1 << 6))
+_FUSB_INTERRUPT_I_COMP_CHNG = const((1 << 5))
+_FUSB_INTERRUPT_I_CRC_CHK = const((1 << 4))
+_FUSB_INTERRUPT_I_ALERT = const((1 << 3))
+_FUSB_INTERRUPT_I_WAKE = const((1 << 2))
+_FUSB_INTERRUPT_I_COLLISION = const((1 << 1))
+_FUSB_INTERRUPT_I_BC_LVL = const(1)
+
+# FIFOs register
+_FUSB_FIFOS = const(0x43)
+
+_FUSB_FIFO_TX_TXON = const(0xA1)
+_FUSB_FIFO_TX_SOP1 = const(0x12)
+_FUSB_FIFO_TX_SOP2 = const(0x13)
+_FUSB_FIFO_TX_SOP3 = const(0x1B)
+_FUSB_FIFO_TX_RESET1 = const(0x15)
+_FUSB_FIFO_TX_RESET2 = const(0x16)
+_FUSB_FIFO_TX_PACKSYM = const(0x80)
+_FUSB_FIFO_TX_JAM_CRC = const(0xFF)
+_FUSB_FIFO_TX_EOP = const(0x14)
+_FUSB_FIFO_TX_TXOFF = const(0xFE)
+
+_FUSB_FIFO_RX_TOKEN_BITS = const(0xE0)
+_FUSB_FIFO_RX_SOP = const(0xE0)
+_FUSB_FIFO_RX_SOP1 = const(0xC0)
+_FUSB_FIFO_RX_SOP2 = const(0xA0)
+_FUSB_FIFO_RX_SOP1DB = const(0x80)
+_FUSB_FIFO_RX_SOP2DB = const(0x60)
 
 def reset():
     # reset the entire FUSB
-    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_RESET, bytes([0b1]))
+    i2c.writeto_mem(_FUSB302B_ADDR, _FUSB_RESET, bytes([_FUSB_RESET_SW_RES]))
 
 def reset_pd():
     # resets the FUSB PD logic
-    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_RESET, bytes([0b10]))
+    i2c.writeto_mem(_FUSB302B_ADDR, _FUSB_RESET, bytes([_FUSB_RESET_PD_RESET]))
 
 def unmask_all():
     # unmasks all interrupts
-    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_MASK, bytes([0b0]))
-    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_MASKA, bytes([0b0]))
-    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_MASKB, bytes([0b0]))
+    i2c.writeto_mem(_FUSB302B_ADDR, _FUSB_MASK1, bytes([0b0]))
+    i2c.writeto_mem(_FUSB302B_ADDR, _FUSB_MASKA, bytes([0b0]))
+    i2c.writeto_mem(_FUSB302B_ADDR, _FUSB_MASKB, bytes([0b0]))
 
 def cc_current():
     # show measured CC level interpreted as USB-C current levels
-    return i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_STATUS0, 1)[0] & 0b11
+    return i2c.readfrom_mem(_FUSB302B_ADDR, _FUSB_STATUS0, 1)[0] & _FUSB_STATUS0_BC_LVL
 
 def read_cc(cc):
     # enable a CC pin for reading
     assert(cc in [0, 1, 2])
-    x = i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_SWITCHES0, 1)[0]
+    x = i2c.readfrom_mem(_FUSB302B_ADDR, _FUSB_SWITCHES0, 1)[0]
     x1 = x
-    clear_mask = ~0b1100 & 0xFF
+    clear_mask = ~(_FUSB_SWITCHES0_MEAS_CC1 | _FUSB_SWITCHES0_MEAS_CC2) & 0xFF
     x &= clear_mask
-    mask = [0b0, 0b100, 0b1000][cc]
+    mask = [0b0, _FUSB_SWITCHES0_MEAS_CC1, _FUSB_SWITCHES0_MEAS_CC2][cc]
     x |= mask
-    #print('TCPC_REG_SWITCHES0: ', bin(x1), bin(x), cc)
-    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_SWITCHES0, bytes((x,)) )
+    # sys.stdout.write('_FUSB_SWITCHES0: ', bin(x1), bin(x), cc)
+    i2c.writeto_mem(_FUSB302B_ADDR, _FUSB_SWITCHES0, bytes((x,)) )
+
+def enable_pullups():
+    # enable host pullups on CC pins, disable pulldowns
+    x = i2c.readfrom_mem(_FUSB302B_ADDR, _FUSB_SWITCHES0, 1)[0]
+    x |= (_FUSB_SWITCHES0_PU_EN1 | _FUSB_SWITCHES0_PU_EN2)
+    i2c.writeto_mem(_FUSB302B_ADDR, 0x02, bytes((x,)) )
+
+def set_mdac(value):
+    x = i2c.readfrom_mem(_FUSB302B_ADDR, _FUSB_MEASURE, 1)[0]
+    x &= 0b11000000 # FIXME: this is a magic number
+    x |= value
+    i2c.writeto_mem(0x22, 0x04, bytes((x,)) )
 
 def enable_pullups():
     # enable host pullups on CC pins, disable pulldowns
@@ -157,16 +364,16 @@ def set_mdac(value):
 
 def enable_sop():
     # enable reception of SOP'/SOP" messages
-    x = i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_CONTROL1, 1)[0]
-    mask = 0b1100011
+    x = i2c.readfrom_mem(_FUSB302B_ADDR, _FUSB_CONTROL1, 1)[0]
+    mask = (_FUSB_CONTROL1_ENSOP1 | _FUSB_CONTROL1_ENSOP2)
     x |= mask
-    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_CONTROL1, bytes((x,)) )
+    i2c.writeto_mem(_FUSB302B_ADDR, _FUSB_CONTROL1, bytes((x,)) )
 
 def disable_pulldowns():
-    x = i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_SWITCHES0, 1)[0]
-    clear_mask = ~0b11 & 0xFF
+    x = i2c.readfrom_mem(_FUSB302B_ADDR, _FUSB_SWITCHES0, 1)[0]
+    clear_mask = ~(_FUSB_SWITCHES0_PDWN_1 | _FUSB_SWITCHES0_PDWN_2) & 0xFF
     x &= clear_mask
-    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_SWITCHES0, bytes((x,)) )
+    i2c.writeto_mem(_FUSB302B_ADDR, _FUSB_SWITCHES0, bytes((x,)) )
 
 def enable_pulldowns():
     x = i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_SWITCHES0, 1)[0]
@@ -208,25 +415,43 @@ def measure_source(debug=False):
 def set_controls_sink():
     # boot: 0b00100100
     ctrl0 = 0b00000000 # unmask all interrupts; don't autostart TX.. disable pullup current
-    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_CONTROL0, bytes((ctrl0,)) )
+    i2c.writeto_mem(_FUSB302B_ADDR, _FUSB_CONTROL0, bytes((ctrl0,)) )
     # boot: 0b00000110
-    ctrl3 = 0b00000111 # enable automatic packet retries
-    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_CONTROL3, bytes((ctrl3,)) )
+    ctrl3 = (_FUSB_CONTROL3_AUTO_RETRY | _FUSB_CONTROL3_N_RETRIES) # enable automatic packet retries
+    i2c.writeto_mem(_FUSB302B_ADDR, _FUSB_CONTROL3, bytes((ctrl3,)) )
 
 host_current=0b10
 
 def set_controls_source():
     # boot: 0b00100100
     ctrl0 = 0b00000000 # unmask all interrupts; don't autostart TX
-    ctrl0 |= host_current << 2 # set host current advertisement pullups
-    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_CONTROL0, bytes((ctrl0,)) )
-    i2c.writeto_mem(0x22, 0x06, bytes((ctrl0,)) )
+    ctrl0 |= host_current << _FUSB_CONTROL0_HOST_CUR_SHIFT # set host current advertisement pullups
+    i2c.writeto_mem(_FUSB302B_ADDR, _FUSB_CONTROL0, bytes((ctrl0,)) )
+    i2c.writeto_mem(_FUSB302B_ADDR, _FUSB_CONTROL0, bytes((ctrl0,)) )
     # boot: 0b00000110
-    ctrl3 = 0b00000110 # no automatic packet retries
-    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_CONTROL3, bytes((ctrl3,)) )
+    ctrl3 = (_FUSB_CONTROL3_N_RETRIES) # no automatic packet retries
+    i2c.writeto_mem(_FUSB302B_ADDR, _FUSB_CONTROL3, bytes((ctrl3,)) )
     # boot: 0b00000010
     #ctrl2 = 0b00000000 # disable DRP toggle. setting it to Do Not Use o_o ???
-    #i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_CONTROL2, bytes((ctrl2,)) )
+    #i2c.writeto_mem(FUSB302B_ADDR, _FUSB_CONTROL2, bytes((ctrl2,)) )
+
+def set_wake(state):
+    # boot: 0b00000010
+    ctrl2 = i2c.readfrom_mem(_FUSB302B_ADDR, _FUSB_CONTROL3, 1)[0]
+    clear_mask = ~(_FUSB_CONTROL3_AUTO_SOFTRESET) & 0xFF
+    ctrl2 &= clear_mask
+    if state:
+        ctrl2 |= _FUSB_CONTROL3_AUTO_SOFTRESET
+    i2c.writeto_mem(_FUSB302B_ADDR, _FUSB_CONTROL3, bytes((ctrl2,)) )
+
+def set_wake(state):
+    # boot: 0b00000010
+    ctrl2 = i2c.readfrom_mem(0x22, 0x08, 1)[0]
+    clear_mask = ~(1 << 3) & 0xFF
+    ctrl2 &= clear_mask
+    if state:
+        ctrl2 | (1 << 3)
+    i2c.writeto_mem(0x22, 0x08, bytes((ctrl2,)) )
 
 def set_wake(state):
     # boot: 0b00000010
@@ -238,28 +463,37 @@ def set_wake(state):
     i2c.writeto_mem(0x22, 0x08, bytes((ctrl2,)) )
 
 def flush_receive():
-    x = i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_CONTROL1, 1)[0]
-    mask = 0b100 # flush receive
+    x = i2c.readfrom_mem(_FUSB302B_ADDR, _FUSB_CONTROL1, 1)[0]
+    mask = (_FUSB_CONTROL1_RX_FLUSH) # flush receive
     x |= mask
-    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_CONTROL1, bytes((x,)) )
+    i2c.writeto_mem(_FUSB302B_ADDR, _FUSB_CONTROL1, bytes((x,)) )
 
 def flush_transmit():
-    x = i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_CONTROL0, 1)[0]
-    mask = 0b01000000 # flush transmit
+    x = i2c.readfrom_mem(_FUSB302B_ADDR, _FUSB_CONTROL0, 1)[0]
+    mask = (_FUSB_CONTROL0_TX_FLUSH) # flush transmit
     x |= mask
-    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_CONTROL0, bytes((x,)) )
+    i2c.writeto_mem(_FUSB302B_ADDR, _FUSB_CONTROL0, bytes((x,)) )
 
 def enable_tx(cc):
     # enables switch on either CC1 or CC2
-    x = i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_SWITCHES1, 1)[0]
+    x = i2c.readfrom_mem(_FUSB302B_ADDR, _FUSB_SWITCHES1, 1)[0]
     x1 = x
-    mask = 0b10 if cc == 2 else 0b1
-    x &= 0b10011100 # clearing both TX bits and revision bits
+    mask = (_FUSB_SWITCHES1_TXCC2) if cc == 2 else (_FUSB_SWITCHES1_TXCC1)
+    x &= ~(_FUSB_SWITCHES1_TXCC1 | _FUSB_SWITCHES1_TXCC2 | _FUSB_SWITCHES1_SPECREV) & 0xff # clearing both TX bits and revision bits
     x |= mask
-    x |= 0b100
-    x |= 0b10 << 5 # revision 3.0
-    #print('et', bin(x1), bin(x), cc)
-    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_SWITCHES1, bytes((x,)) )
+    x |= (_FUSB_SWITCHES1_AUTO_CRC)
+    x |= (_FUSB_SWITCHES1_SPECREV30) # revision 3.0
+    # sys.stdout.write('_FUSB_SWITCHES1: ', bin(x1), bin(x), cc)
+    i2c.writeto_mem(_FUSB302B_ADDR, _FUSB_SWITCHES1, bytes((x,)) )
+
+def set_roles(power_role = 0, data_role = 0):
+    x = i2c.readfrom_mem(_FUSB302B_ADDR, _FUSB_SWITCHES1, 1)[0]
+    x &= ~(_FUSB_SWITCHES1_DATAROLE | _FUSB_SWITCHES1_POWERROLE) # clearing both role bits
+    if power_role:
+        x |= _FUSB_SWITCHES1_POWERROLE
+    if data_role: 
+        x |= _FUSB_SWITCHES1_DATAROLE
+    i2c.writeto_mem(_FUSB302B_ADDR, _FUSB_SWITCHES1, bytes((x,)) )
 
 def set_roles(power_role = 0, data_role = 0):
     x = i2c.readfrom_mem(0x22, 0x03, 1)[0]
@@ -270,45 +504,44 @@ def set_roles(power_role = 0, data_role = 0):
 
 def power():
     # enables all power circuits
-    x = i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_POWER, 1)[0]
-    mask = 0b1111
+    x = i2c.readfrom_mem(_FUSB302B_ADDR, _FUSB_POWER, 1)[0]
+    mask = (_FUSB_POWER_PWR0 | _FUSB_POWER_PWR1 | _FUSB_POWER_PWR2 | _FUSB_POWER_PWR3)
     x |= mask
-    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_POWER, bytes((x,)) )
+    i2c.writeto_mem(_FUSB302B_ADDR, _FUSB_POWER, bytes((x,)) )
 
 def polarity():
     # reads polarity and role bits from STATUS1A
-    return (i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_STATUS1A, 1)[0] >> 3) & 0b111
+    return (i2c.readfrom_mem(_FUSB302B_ADDR, _FUSB_STATUS1A, 1)[0] >> 3) & (_FUSB_STATUS1A_RXSOP | _FUSB_STATUS1A_RXSOP1DB | _FUSB_STATUS1A_RXSOP2DB)
     #'0b110001'
 
 def interrupts():
-    # return all interrupt registers
-    return i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_INTERRUPTA, 2)+i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_INTERRUPT, 1)
+    # show interrupt
+    return i2c.readfrom_mem(_FUSB302B_ADDR, _FUSB_INTERRUPTA, 2)+i2c.readfrom_mem(_FUSB302B_ADDR, _FUSB_INTERRUPT, 1)
 
-# interrupts are cleared just by reading them, it seems
-#def clear_interrupts():
-#    # clear interrupt
-#    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_INTERRUPTA, bytes([0]))
-#    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_INTERRUPT, bytes([0]))
+def clear_interrupts():
+    # clear interrupt
+    i2c.writeto_mem(_FUSB302B_ADDR, _FUSB_INTERRUPTA, bytes([0]))
+    i2c.writeto_mem(_FUSB302B_ADDR, _FUSB_INTERRUPT, bytes([0]))
 
 # this is a way better way to do things than the following function -
 # the read loop should be ported to this function, and the next ome deleted
 def rxb_state():
     # get read buffer interrupt states - (rx buffer empty, rx buffer full)
-    st = i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_STATUS1, 1)[0]
+    st = i2c.readfrom_mem(_FUSB302B_ADDR, _FUSB_STATUS1, 1)[0]
     return ((st & 0b100000) >> 5, (st & 0b10000) >> 4)
 
 # TODO: yeet
 def rxb_state():
-    st = i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_STATUS1, 1)[0]
+    st = i2c.readfrom_mem(_FUSB302B_ADDR, _FUSB_STATUS1, 1)[0]
     return ((st & 0b110000) >> 4, (st & 0b11000000) >> 6)
 
 def get_rxb(l=80):
     # read from FIFO
-    return i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_FIFOS, l)
+    return i2c.readfrom_mem(_FUSB302B_ADDR, _FUSB_FIFOS, l)
 
 def hard_reset():
-    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_CONTROL3, bytes([0b1000000]))
-    return i2c.readfrom_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_CONTROL3, 1)
+    i2c.writeto_mem(_FUSB302B_ADDR, _FUSB_CONTROL3, bytes([_FUSB_CONTROL3_SEND_HARD_RESET]))
+    return i2c.readfrom_mem(_FUSB302B_ADDR, _FUSB_CONTROL3, 1)
 
 def find_cc(fn=measure_sink, debug=False):
     cc = fn(debug=debug)
@@ -785,9 +1018,9 @@ def send_command(command, data, msg_id=None, rev=0b10, power_role=0, data_role=0
 
     sop_seq[4] |= len(message)
 
-    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_FIFOS, bytes(sop_seq) )
-    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_FIFOS, bytes(message) )
-    i2c.writeto_mem(FUSB302_I2C_SLAVE_ADDR, TCPC_REG_FIFOS, bytes(eop_seq) )
+    i2c.writeto_mem(_FUSB302B_ADDR, _FUSB_FIFOS, bytes(sop_seq) )
+    i2c.writeto_mem(_FUSB302B_ADDR, _FUSB_FIFOS, bytes(message) )
+    i2c.writeto_mem(_FUSB302B_ADDR, _FUSB_FIFOS, bytes(eop_seq) )
 
     sent_messages.append(message)
 
