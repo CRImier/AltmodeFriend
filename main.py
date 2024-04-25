@@ -1167,7 +1167,7 @@ def record_flow():
         print(get_buffer_fast())
         #print(get_rxb(80))
         #print(get_message())
-    sleep(0.001)
+    sleep(0.0001)
 
 def get_buffer_fast():
     packet = []
