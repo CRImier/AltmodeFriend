@@ -954,6 +954,43 @@ def parse_vdm(d):
         vdmd = [data[1] & 0x7f, data[0]]
         d["vdm_d"] = vdmd
 
+vdm_dp_pin_assg = {
+ 0b1:"A",
+ 0b10:"B",
+ 0b100:"C",
+ 0b1000:"D",
+ 0b10000:"E",
+ 0b100000:"F",
+}
+
+vdm_dp_port_cap = [
+ "RES",
+ "UFP",
+ "DFP",
+ "UFP&DFP"
+]
+
+vdm_dp_port_conn = [
+ "NC",
+ "UFP",
+ "DFP",
+ "UFP&DFP"
+]
+
+vdm_dp_port_conf = [
+ "USB",
+ "DFP",
+ "DFP",
+ "RES"
+]
+
+vdm_dp_sgn = {
+ 0b1:"DP",
+ 0b10:"USBg2",
+ 0b100:"RES1",
+ 0b1000:"RES2"
+}
+
 def print_vdm(d):
     if d["vdm_s"]:
         svid_name = d["vdm_svn"]
@@ -962,6 +999,91 @@ def print_vdm(d):
         cmd_type_name = vdm_cmd_types[d["vdm_ct"]]
         cmd_name = d["vdm_cn"]
         sys.stdout.write("VDM: str, m{} v{} o{}, ct{}: {}\n".format(svid_name, version_str, objpos_str, cmd_type_name, cmd_name))
+        if svid_name == "DisplayPort":
+            if cmd_name == "Discover Modes" and cmd_type_name == "ACK":
+                msg = d['d'][4:]
+                # port capability (bits 0:1)
+                port_cap = msg[0] & 0b11
+                vdm_dp_port_cap_s = vdm_dp_port_cap[port_cap]
+                # signaling (bits 5:2)
+                sgn = (msg[0] >> 2) & 0b1111
+                sgn_s = []
+                for p in vdm_dp_sgn.keys():
+                    if sgn & p:
+                        sgn_s.append(vdm_dp_sgn[p])
+                sgn_s = ",".join(sgn_s)
+                # receptacle indication (bit 6)
+                r_i = (msg[0] >> 6) & 0b1
+                r_s = "re" if r_i else "pl"
+                # usb2 signaling (bit 7)
+                u2_i = (msg[0] >> 7) & 0b1
+                u2_s = "n" if u2_i else "y"
+                # dfp pin assignments (bits 15:8)
+                dfp_assy_n = msg[1]
+                dfp_assy_s = ""
+                for p in vdm_dp_pin_assg.keys():
+                    if dfp_assy_n & p:
+                        dfp_assy_s += vdm_dp_pin_assg[p]
+                # dfp pin assignments (bits 23:16)
+                ufp_assy_n = msg[2]
+                ufp_assy_s = ""
+                for p in vdm_dp_pin_assg.keys():
+                    if ufp_assy_n & p:
+                        ufp_assy_s += vdm_dp_pin_assg[p]
+                #res_byte = msg[3] # (bites 31:24, has to be 0)
+                sys.stdout.write("\tModes: p_cap:{} sgn:{} ri:{} u2:{} d_ass:{} u_ass:{}\n".format(vdm_dp_port_cap_s, sgn_s, r_s, u2_s, dfp_assy_s, ufp_assy_s))
+            elif cmd_name == "DP Status Update":
+                msg = d['d'][4:]
+                # dfp/ufp connected (bits 0:1)
+                conn = msg[0] & 0b11
+                conn_s = vdm_dp_port_conn[conn]
+                # power (bit 2)
+                pwr = (msg[0] >> 2) & 0b1
+                pwr_s = "d" if pwr else "n"
+                # enabled (bit 3)
+                en = (msg[0] >> 3) & 0b1
+                en_s = "y" if en else "n"
+                # multi-function (bit 4)
+                mf = (msg[0] >> 4) & 0b1
+                mf_s = "p" if mf else "n"
+                # usb switch req (bit 5)
+                usw = (msg[0] >> 5) & 0b1
+                usw_s = "r" if usw else "n"
+                # dp exit req (bit 6)
+                dpe = (msg[0] >> 6) & 0b1
+                dpe_s = "r" if dpe else "n"
+                # HPD state (bit 7)
+                hpd = (msg[0] >> 7) & 0b1
+                hpd_s = "h" if hpd else "l"
+                # IRQ state (bit 8)
+                irq = msg[1] & 0b1
+                irq_s = str(irq)
+                sys.stdout.write("\tStatus: conn:{} pwr:{} en:{} mf:{} usw:{} dpe:{} hpd:{} irq:{}\n".format(conn_s, pwr_s, en_s, mf_s, usw_s, dpe_s, hpd_s, irq_s))
+            if cmd_name == "DP Configure" and cmd_type_name == "REQ":
+                msg = d['d'][4:]
+                # select configuration (bits 0:1)
+                conf = msg[0] & 0b11
+                conf_s = vdm_dp_port_conf[conf]
+                # signaling (bits 5:2)
+                sgn = (msg[0] >> 2) & 0b1111
+                sgn_s = []
+                for p in vdm_dp_sgn.keys():
+                    if sgn & p:
+                        sgn_s.append(vdm_dp_sgn[p])
+                sgn_s = ",".join(sgn_s)
+                if not sgn_s:
+                    sgn_s = "UNSP"
+                # reserved (bits 7:6)
+                # ufp pin assignments (bits 15:8)
+                ufp_assy_n = msg[1]
+                ufp_assy_s = ""
+                for p in vdm_dp_pin_assg.keys():
+                    if ufp_assy_n & p:
+                        ufp_assy_s += vdm_dp_pin_assg[p]
+                #res_bytes = msg[2:] # (bytes 31:24, has to be 0)
+                sys.stdout.write("\tConfigure: conf:{} sgn:{} p_ass:{}\n".format(conf_s, sgn_s, ufp_assy_s))
+            #di = d
+            #breakpoint()
     else:
         sys.stdout.write("VDM: unstr, m{}, d{}".format(svid_name, myhex(d["vdm_d"])))
 
