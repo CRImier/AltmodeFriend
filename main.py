@@ -894,34 +894,94 @@ vdm_cmd_types = ["REQ", "ACK", "NAK", "BUSY"]
 
 def react_vdm(d):
     if d["vdm_s"]:
-        # version: major and minor
         cmd_type = d["vdm_ct"]
         command_name = d["vdm_cn"]
+        # response vdm params
+        rd = {}
+        # all same params as the incoming message, save for the command type
+        for key in ["vdm_s", "vdm_sv", "vdm_c", "vdm_v", "vdm_o"]:
+            rd[key] = d[key]
+        # command type is ACK and not REQ for all command replies
+        rd["vdm_ct"] = 1 # ACK
         if command_name == "Discover Identity":
+            # discover identity response with "we are an altmode adapter yesyes"
             data = list(b'A\xA0\x00\xff\xa4%\x00,\x00\x00\x00\x00\x01\x00\x00\x00\x0b\x00\x00\x11')
-            send_command(d["t"], data)
-            #sys.stdout.write("a")
+            r = create_vdm_data(rd, data[4:])
+            print(r)
+            print(data)
+            send_command(d["t"], r)
+            #sys.stdout.write("a") # debug stuff
         elif command_name == "Discover SVIDs":
             data = list(b'B\xA0\x00\xff\x00\x00\x01\xff')
-            send_command(d["t"], data)
+            r = create_vdm_data(rd, data[4:])
+            print(r)
+            print(data)
+            send_command(d["t"], r)
             #sys.stdout.write("b")
         elif command_name == "Discover Modes":
+            #data = list(b'C\xA0\x01\xff\x45\x04\x00\x00')
             data = list(b'C\xA0\x01\xff\x05\x0c\x00\x00')
-            send_command(d["t"], data)
+            r = create_vdm_data(rd, data[4:])
+            print(r)
+            print(data)
+            send_command(d["t"], r)
             #sys.stdout.write("c")
         elif command_name == "Enter Mode":
             data = list(b'D\xA1\x01\xff')
-            send_command(d["t"], data)
+            r = create_vdm_data(rd, [])
+            print(r)
+            print(data)
+            send_command(d["t"], r)
             #sys.stdout.write("d")
         elif command_name == "DP Status Update":
-            data = list(b'P\xA1\x01\xff\x1a\x00\x00\x00')
-            send_command(d["t"], data)
+            #data = list(b'P\xA1\x01\xff\x1a\x00\x00\x00')
+            data = list(b'P\xA1\x01\xff\x9a\x00\x00\x00')
+            r = create_vdm_data(rd, data[4:])
+            print(r)
+            print(data)
+            send_command(d["t"], r)
             #sys.stdout.write("e")
         elif command_name == "DP Configure":
             data = list(b'Q\xA1\x01\xff')
-            send_command(d["t"], data)
+            r = create_vdm_data(rd, [])
+            print(r)
+            print(data)
+            send_command(d["t"], r)
             #sys.stdout.write("f")
-    # idk what to do if the vdm is unstructured, for now
+    # no unstructured vdm processing at this time
+
+def create_vdm_data(d, data):
+    """
+    Creates the VDM header (PDO) from a dict with pre-supplied data and an additional data list.
+    """
+    l = 4 + len(data)
+    vdm = bytearray(l)
+    for i in data:
+        vdm[i+4] = i
+    # most basic vdm flags
+    vdm_s = d["vdm_s"]
+    vdm[1] |= vdm_s << 7
+    vdm_sv = d["vdm_sv"]
+    vdm[2] = vdm_sv & 0xff
+    vdm[3] = vdm_sv >> 8
+    # can't build unstructured vdms yet
+    if vdm_s:
+        # building structured vdm
+        # vdm command
+        vdm_c = d["vdm_c"]
+        vdm[0] |= (vdm_c & 0b11111)
+        # vdm command type
+        vdm_ct = d["vdm_ct"]
+        vdm[0] |= (vdm_ct & 0b11) << 6
+        # default version codes set to 0b01; 0b00
+        vdm_v = d.get("vdm_v", 0b0100)
+        vdm[1] |= (vdm_v & 0b1111) << 3
+        # object position
+        vdm_o = d.get("vdm_o", 0)
+        vdm[1] |= vdm_o & 0b111
+    else:
+        raise NotImplementedError
+    return bytes(vdm)
 
 def parse_vdm(d):
     data = d['d']
