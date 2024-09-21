@@ -237,7 +237,7 @@ class FUSB302():
             fn = getattr(self, fn)
         cc = fn(debug=debug)
         self.flush_receive()
-        fusb.enable_tx(cc)
+        self.enable_tx(cc)
         self.read_cc(cc)
         self.flush_transmit()
         self.flush_receive()
