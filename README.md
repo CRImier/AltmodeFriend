@@ -4,6 +4,7 @@ Find example code and 3D STEP in this repo.
 
 Code examples:
 
+- `simplest_sink_example.py`: A sink example code, that just picks 5V by default. Currently not tested after refactoring. It also might summon DisplayPort out of a DP source, but that's just an accident.
 - `sink_example.py`: A sink example code, with two different strategies for picking a PD profile. Currently not tested after refactoring. It also can summon DisplayPort out of a DP source - but the PoC is not fully tested yet.
 - `source_example`: Firmware for a bespoke board that uses the stack to create a PD PSU. Currently not tested after refactoring.
 - `sniffer.py`: PD sniffer code. Change `replay` to False to run it and adjust the CC pin. Live capture not currently tested after refactoring.
