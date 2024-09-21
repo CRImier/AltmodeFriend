@@ -44,6 +44,23 @@ stacc.process_accept_cb = process_accept
 #
 ###################################
 
+"""
+Here's the summary of what you need to care about.
+You must pick a PD profile within 500ms (or so)
+after a PSU sends you the Source_Capabilities
+message. As a result, the responder function has to be quick.
+You cannot do user input in this function, or any long-winded processing.
+
+If you don't pick a profile within the timeout, the PSU will shut off the default 5V power.
+
+Remember - after you request any profile, you can re-request profiles arbitrarily.
+So, if you need to pick user-chosen profiles, you can initially pick the 5V profile,
+and then take your time to think about it, sending a new Request as soon as you want to.
+
+The last received PDOs are always available as `stacc.pdos`.
+"""
+
+
 # simple example - pick a fixed PDO with voltage of 20, and request maximum current available
 
 expected_voltage = 20
