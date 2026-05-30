@@ -8,21 +8,28 @@ t = []
 # filter address
 addr = 0x22
 
+# all addrs that appear in comms
+addrs = []
+
 # read/write keyword shortening
 tts = {"write:":'wr', "read:":'rd'}
+
 
 with open('dec.txt', 'r') as f:
   line = f.readline()
   while line:
     line = line.strip()
     if not line:
-        break
+        break # or `continue` to go to the next line
     tss, _, _, d = line.split(' ', 3)
     if d == "Start":
         # new transaction
         # saving/discarding the current one
         if t:
-            if t[1] != addr:
+            t_addr = t[1]
+            if t_addr not in addrs:
+                addrs.append(t_addr)
+            if t_addr != addr:
                 #print("Filtering transaction for", hex(t[0]), ":", t)
                 t = ["start"] # discarding the entire transaction
             else:
@@ -73,14 +80,19 @@ regs = {
     0x3C: "STATUS0A",
     0x3D: "STATUS1A",
     0x3E: "INTRPT_A",
-    0x3F: "INTRPT_A",
+    0x3F: "INTRPT_B",
     0x40: "STATUS0",
     0x41: "STATUS1",
-    0x42: "INTRPT_A",
+    0x42: "INTERRPT",
     0x43: "FIFO",
 }
 
+# for preetty-printing column width consistency
 longest_regn = max(map(len, regs.values()))
+
+# storing the human-readable transaction data
+
+transactions = []
 
 for t in tr:
     addr = t[1]
@@ -98,6 +110,9 @@ for t in tr:
     data = " ".join(list(map(myhex, d)))
     data += ' ({})'.format(" ".join(list(map(mybin, d))))
     reg_str = "{} ({})".format(myhex(reg), regs.get(reg, " ").rjust(longest_regn, ' '))
-    print(myhex(addr), reg_str, op, data)
+    transactions.append([myhex(addr), reg_str, op, data])
+
+for transaction in transactions:
+    print(*transaction)
 
 
