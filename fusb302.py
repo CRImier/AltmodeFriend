@@ -152,12 +152,12 @@ class FUSB302():
 
     def set_wake(self, state):
         # boot: 0b00000010
-        ctrl2 = self.bus.readfrom_mem(0x22, 0x08, 1)[0]
+        ctrl2 = self.bus.readfrom_mem(0x22, self.REG_CONTROL2, 1)[0]
         clear_mask = ~(1 << 3) & 0xFF
         ctrl2 &= clear_mask
         if state:
             ctrl2 | (1 << 3)
-        self.bus.writeto_mem(0x22, 0x08, bytes((ctrl2,)) )
+        self.bus.writeto_mem(0x22, self.REG_CONTROL2, bytes((ctrl2,)) )
 
     def flush_receive(self):
         x = self.bus.readfrom_mem(self.addr, self.REG_CONTROL1, 1)[0]
@@ -232,17 +232,21 @@ class FUSB302():
         self.bus.writeto_mem(self.addr, self.REG_CONTROL3, bytes([0b1000000]))
         return self.bus.readfrom_mem(self.addr, self.REG_CONTROL3, 1)
 
-    def find_cc(self, fn="measure_sink", debug=False):
-        if isinstance(fn, str):
-            fn = getattr(self, fn)
-        cc = fn(debug=debug)
+    def set_to_cc(self, cc):
         self.flush_receive()
         self.enable_tx(cc)
         self.read_cc(cc)
         self.flush_transmit()
         self.flush_receive()
-        #import gc; gc.collect()
         self.reset_pd()
+
+    def find_cc(self, fn="measure_sink", debug=False):
+        if isinstance(fn, str):
+            fn = getattr(self, fn)
+        cc = fn(debug=debug)
+        if cc != 0:
+            self.set_to_cc(cc)
+        #import gc; gc.collect()
         return cc
 
     # FUSB toggle logic shorthands
