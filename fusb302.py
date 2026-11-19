@@ -1,4 +1,8 @@
 from time import sleep
+try:
+    import smbus
+except ImportError:
+    smbus = None
 
 ########################
 #
@@ -31,6 +35,7 @@ class FUSB302():
     REG_FIFOS = 0x43
 
     def __init__(self, bus, addr=0x22, int_p=None):
+        self.is_linux_smbus = smbus != None
         self.bus = bus
         self.addr = addr
         self.int_p = int_p

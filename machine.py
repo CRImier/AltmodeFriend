@@ -9,6 +9,16 @@ import time
 time.ticks_us = Mock()
 time.ticks_diff = Mock()
 
+from smbus2 import SMBus
+
+try:
+    import smbus
+    from smbus2 import SMBus
+except ImportError:
+    smbus = None
+
+
+
 class PinEvent:
     def __init__(self, old_value, new_value):
         self.event_id = None
@@ -227,6 +237,9 @@ class I2C(Bus):
 
     def __init__(self, id, scl, sda, freq=400000):
         super().__init__()
+        self.is_linux_smbus = smbus != None
+        if self.is_linux_smbus:
+            self._bus = SMBus(id)
         self.id = id
         self.scl = scl
         self.sda = sda
@@ -285,7 +298,29 @@ class I2C(Bus):
     """Read nbytes from the peripheral specified by addr starting from the memory address specified by memaddr. 
     The argument addrsize specifies the address size in bits. Returns a bytes object with the data read."""
     def readfrom_mem(self, addr, memaddr, nbytes, *, addrsize=8):
-        return bytearray(100)
+        #print("readfrom_mem {} {} {} ".format(hex(addr), hex(memaddr), hex(nbytes)), end='')
+        if nbytes > 1:
+            #raise NotImplementedError('readfrom_mem nbytes > 1')
+            # can only read 32 bytes at a time weh
+            if nbytes > 32:
+                lens = [32]*(nbytes//32)
+                if nbytes % 32: lens.append(nbytes%32)
+            else:
+                lens = [nbytes]
+            #print(f" {lens} ", end='')
+            data = []
+            for len in lens:
+                if self.is_linux_smbus:
+                    data += self._bus.read_i2c_block_data(addr, memaddr, len)
+            result = bytes(data)
+        else:
+            if self.is_linux_smbus:
+                result = bytes([self._bus.read_byte_data(addr, memaddr)])
+            else:
+                resunt = bytes([0x00])
+        #print(result)
+        return result
+        #return bytearray(100)
         raise NotImplementedError('readfrom_mem')
 
     """Read into buf from the peripheral specified by addr starting from the memory address specified by memaddr. 
@@ -299,7 +334,14 @@ class I2C(Bus):
     The argument addrsize specifies the address size in bits (on ESP8266 this argument is not recognised and the address size is always 8 bits).
     The method returns None."""
     def writeto_mem(self, addr, memaddr, buf, *, addrsize=8):
-        return
+        #print("writeto_mem {} {} {}".format(hex(addr), hex(memaddr), str(buf)))
+        if len(buf) == 1:
+            if self.is_linux_smbus:
+                return _bus.write_byte_data(addr, memaddr, buf[0])
+        else:
+            if self.is_linux_smbus:
+                return _bus.write_i2c_block_data(addr, memaddr, buf)
+            #raise NotImplementedError('writeto_mem len(buf) > 1')
         raise NotImplementedError('writeto_mem')
 
 
