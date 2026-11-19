@@ -89,6 +89,7 @@ class PDStacc():
             cc = self.fusb.find_cc(fn="measure_sink")
         cc = self.fusb.find_cc(fn="measure_sink", debug=True)
         self.cc = cc
+        self.reset_msg_id()
 
     def setup_listen(self, cc):
         self.fusb.flush_receive()
@@ -160,7 +161,7 @@ class PDStacc():
                         print("sending advertisement")
                         self.send_advertisement(psu_advertisement)
                         advertisement_counter += 1
-                if self.fusb.int_p.value() == 0:
+                if not self.fusb_int_p or self.fusb.int_p.value() == 0:
                     i = self.fusb.interrupts()
                     print(i)
                     i_reg = i[2]
@@ -196,70 +197,77 @@ class PDStacc():
 
     def flow_sink(self):
         self.pdo_requested = False # not sure this needs to be here
-        self.reset_msg_id()
         try:
             timeout = 0.00001
             while True:
-                if self.fusb.rxb_state()[0] == 0: # buffer non-empty
-                    d = self.get_message()
-                    self.packets.append(d)
-                    msg_types = control_message_types if d["c"] else data_message_types
-                    msg_name = msg_types[d["t"]]
-                    # now we do things depending on the message type that we received
-                    if msg_name == "GoodCRC": # example
-                        pass # print("GoodCRC")
-                    elif msg_name == "Source_Capabilities":
-                        # need to request a PDO!
-                        self.pdos = self.get_pdos(d)
-                        pdo_i, current = self.select_pdo(self.pdos)
-                        # sending a message, need to increment message id
-                        self.request_fixed_pdo(pdo_i, current, current)
-                        # print("PDO requested!")
-                        self.pdo_requested = True
-                        sys.stdout.write(str(self.pdos))
-                        sys.stdout.write('\n')
-                    elif msg_name in ["Accept", "PS_RDY"]:
-                        self.process_accept_cb(d)
-                    elif msg_name == "Vendor_Defined":
-                        self.parse_vdm(d)
-                        self.react_vdm(d)
-                    self.show_msg(d)
-                    for message in self.sent_messages:
-                        sys.stdout.write('> ')
-                        sys.stdout.write(myhex(message))
-                        sys.stdout.write('\n')
-                    self.sent_messages = []
+                do_exit = self.iter_sink()
+                if do_exit: return
                 sleep(timeout) # so that ctrlc works
-                if self.fusb.int_p.value() == 0:
-                    # needs sink detach processing here lmao
-                    i = self.fusb.interrupts()
-                    print(i)
-                    i_reg = i[2]
-                    if i_reg & 0x80: # I_VBUSOK
-                        pass # just a side effect of vbus being attached
-                    if i_reg & 0x40: # I_ACTIVITY
-                        print("I_ACTIVITY")
-                        pass # just a side effect of CC comms I think?
-                    if i_reg & 0x20: # I_COMP_CHNG
-                        print("I_COMP_CHNG")
-                        cc = self.fusb.find_cc(fn="measure_sink")
-                        if cc == 0:
-                            print("Disconnect detected!")
-                            return # we exiting this
-                    if i_reg & 0x10: # I_CRC_CHK
-                        pass # new CRC, just a side effect of CC comms
-                    if i_reg & 0x8: # I_ALERT
-                        print("I_ALERT")
-                    if i_reg & 0x4: # I_WAKE
-                        print("I_WAKE")
-                    if i_reg & 0x2: # I_COLLISION
-                        print("I_COLLISION")
-                    if i_reg & 0x1: # I_BC_LVL
-                        print("I_BC_LVL")
         except KeyboardInterrupt:
             print("CtrlC")
             sleep(1)
             raise
+
+    def iter_sink(self):
+        if self.fusb.rxb_state()[0] == 0: # buffer non-empty
+            d = self.get_message()
+            print(d)
+            self.packets.append(d)
+            msg_types = control_message_types if d["c"] else data_message_types
+            msg_name = msg_types[d["t"]]
+            # now we do things depending on the message type that we received
+            if msg_name == "GoodCRC": # example
+                pass # print("GoodCRC")
+            elif msg_name == "Source_Capabilities":
+                # need to request a PDO!
+                self.pdos = self.get_pdos(d)
+                pdo_i, current = self.select_pdo(self.pdos)
+                # sending a message, need to increment message id
+                self.request_fixed_pdo(pdo_i, current, current)
+                # print("PDO requested!")
+                self.pdo_requested = True
+                sys.stdout.write(str(self.pdos))
+                sys.stdout.write('\n')
+            elif msg_name in ["Accept", "PS_RDY"]:
+                self.process_accept_cb(d)
+            elif msg_name == "Vendor_Defined":
+                self.parse_vdm(d)
+                self.react_vdm(d)
+            self.show_msg(d)
+            if msg_name == "Soft_Reset":
+                # exit the loop here, we got soft reset, dassit
+                return True
+            for message in self.sent_messages:
+                sys.stdout.write('> ')
+                sys.stdout.write(myhex(message))
+                sys.stdout.write('\n')
+            self.sent_messages = []
+        if self.fusb.int_p.value() == 0 or True:
+            # needs sink detach processing here lmao
+            i = self.fusb.interrupts()
+            #print(i)
+            i_reg = i[2]
+            if i_reg & 0x80: # I_VBUSOK
+                pass # just a side effect of vbus being attached
+            if i_reg & 0x40: # I_ACTIVITY
+                #print("I_ACTIVITY")
+                pass # just a side effect of CC comms I think?
+            if i_reg & 0x20: # I_COMP_CHNG
+                pass #print("I_COMP_CHNG")
+                cc = self.fusb.find_cc(fn="measure_sink")
+                if cc == 0:
+                    print("Disconnect detected!")
+                    return True # we exiting this
+            if i_reg & 0x10: # I_CRC_CHK
+                pass # new CRC, just a side effect of CC comms
+            if i_reg & 0x8: # I_ALERT
+                print("I_ALERT")
+            if i_reg & 0x4: # I_WAKE
+                print("I_WAKE")
+            if i_reg & 0x2: # I_COLLISION
+                print("I_COLLISION")
+            if i_reg & 0x1: # I_BC_LVL
+                pass # print("I_BC_LVL")
 
     ########################
     #
@@ -464,7 +472,7 @@ class PDStacc():
     #
     ########################
 
-    def send_command(self, command, data, msg_id=None, rev=0b10, power_role=0, data_role=0):
+    def send_command(self, command, data, msg_id=None, rev=0b10, power_role=0, data_role=0, is_ext=0):
         p = [command, data, msg_id, rev, power_role, data_role]
         self.packets.append(p)
         msg_id = self.increment_msg_id() if msg_id is None else msg_id
@@ -479,6 +487,7 @@ class PDStacc():
         header[1] = power_role & 0b1
         header[1] |= (msg_id & 0b111) << 1 # message ID
         header[1] |= obj_count << 4
+        header[1] |= is_ext << 7 # Extended message
 
         message = header+data
 
