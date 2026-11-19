@@ -130,6 +130,7 @@ class FUSB302():
     def set_controls_sink(self):
         # boot: 0b00100100
         ctrl0 = 0b00000000 # unmask all interrupts; don't autostart TX.. disable pullup current
+        ctrl0 |= self.host_current << 2 # enable only the pullup current bits that fusb is configured for
         self.bus.writeto_mem(self.addr, self.REG_CONTROL0, bytes((ctrl0,)) )
         # boot: 0b00000110
         ctrl3 = 0b00000111 # enable automatic packet retries
@@ -141,7 +142,6 @@ class FUSB302():
         # boot: 0b00100100
         ctrl0 = 0b00000000 # unmask all interrupts; don't autostart TX
         ctrl0 |= self.host_current << 2 # set host current advertisement pullups
-        self.bus.writeto_mem(self.addr, self.REG_CONTROL0, bytes((ctrl0,)) )
         self.bus.writeto_mem(self.addr, self.REG_CONTROL0, bytes((ctrl0,)) )
         # boot: 0b00000110
         ctrl3 = 0b00000110 # no automatic packet retries
@@ -262,7 +262,6 @@ class FUSB302():
         return cc
 
     # FUSB toggle logic shorthands
-    # currently unused
 
     polarity_values = (
       (0, 0),   # 000: logic still running
@@ -282,15 +281,27 @@ class FUSB302():
         "Rd-3.0"
     )
 
-    def p_pol(self):
+    def set_toggle(self, state, mode=0b01, wake_en=0b1, rd_only=0b1, tg_pwrsave=0b00):
+        #ctrl2 = self.bus.readfrom_mem(self.addr, self.REG_CONTROL2)[0]
+        #ctrl2 &= (~0b11101111)&0xff # clear all
+        ctrl2  = 0 # just clear all tbqh
+        if state:
+            ctrl2 |= bin(state) # enable
+            ctrl2 |= mode << 1 # default DRP mode
+            ctrl2 |= wake_en << 3 # enable
+            ctrl2 |= rd_only << 5 # enable
+            ctrl2 |= tg_pwrsave << 6 # enable
+        self.bus.writeto_mem(self.addr, self.REG_CONTROL2, bytes((ctrl2,)) )
+
+    def print_pol(self):
         return polarity_values[self.polarity()]
 
-    def p_int(self, a=None):
+    def print_int(self, a=None):
         if a is None:
             a = self.interrupts()
         return [bin(x) for x in a]
 
-    def p_cur(self):
+    def print_cur(self):
         return current_values[self.cc_current()]
 
     def send(self, message):
