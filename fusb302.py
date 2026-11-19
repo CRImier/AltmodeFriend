@@ -67,15 +67,15 @@ class FUSB302():
 
     def enable_pullups(self):
         # enable host pullups on CC pins, disable pulldowns
-        x = self.bus.readfrom_mem(0x22, 0x02, 1)[0]
+        x = self.bus.readfrom_mem(self.addr, self.REG_SWITCHES0, 1)[0]
         x |= 0b11000000
-        self.bus.writeto_mem(0x22, 0x02, bytes((x,)) )
+        self.bus.writeto_mem(self.addr, self.REG_SWITCHES0, bytes((x,)) )
 
     def set_mdac(self, value):
-        x = self.bus.readfrom_mem(0x22, 0x04, 1)[0]
+        x = self.bus.readfrom_mem(self.addr, self.REG_MEASURE, 1)[0]
         x &= 0b11000000
         x |= value
-        self.bus.writeto_mem(0x22, 0x04, bytes((x,)) )
+        self.bus.writeto_mem(self.addr, self.REG_MEASURE, bytes((x,)) )
 
     def enable_sop(self):
         # enable reception of SOP'/SOP" messages
@@ -142,7 +142,7 @@ class FUSB302():
         ctrl0 = 0b00000000 # unmask all interrupts; don't autostart TX
         ctrl0 |= self.host_current << 2 # set host current advertisement pullups
         self.bus.writeto_mem(self.addr, self.REG_CONTROL0, bytes((ctrl0,)) )
-        self.bus.writeto_mem(0x22, 0x06, bytes((ctrl0,)) )
+        self.bus.writeto_mem(self.addr, self.REG_CONTROL0, bytes((ctrl0,)) )
         # boot: 0b00000110
         ctrl3 = 0b00000110 # no automatic packet retries
         self.bus.writeto_mem(self.addr, self.REG_CONTROL3, bytes((ctrl3,)) )
@@ -152,12 +152,12 @@ class FUSB302():
 
     def set_wake(self, state):
         # boot: 0b00000010
-        ctrl2 = self.bus.readfrom_mem(0x22, self.REG_CONTROL2, 1)[0]
+        ctrl2 = self.bus.readfrom_mem(self.addr, self.REG_CONTROL2, 1)[0]
         clear_mask = ~(1 << 3) & 0xFF
         ctrl2 &= clear_mask
         if state:
             ctrl2 | (1 << 3)
-        self.bus.writeto_mem(0x22, self.REG_CONTROL2, bytes((ctrl2,)) )
+        self.bus.writeto_mem(self.addr, self.REG_CONTROL2, bytes((ctrl2,)) )
 
     def flush_receive(self):
         x = self.bus.readfrom_mem(self.addr, self.REG_CONTROL1, 1)[0]
@@ -184,11 +184,11 @@ class FUSB302():
         self.bus.writeto_mem(self.addr, self.REG_SWITCHES1, bytes((x,)) )
 
     def set_roles(self, power_role = 0, data_role = 0):
-        x = self.bus.readfrom_mem(0x22, 0x03, 1)[0]
+        x = self.bus.readfrom_mem(self.addr, self.REG_SWITCHES1, 1)[0]
         x &= 0b01101111 # clearing both role bits
         x |= power_role << 7
         x |= data_role << 7
-        self.bus.writeto_mem(0x22, 0x03, bytes((x,)) )
+        self.bus.writeto_mem(self.addr, self.REG_SWITCHES1, bytes((x,)) )
 
     def power(self):
         # enables all power circuits
@@ -205,6 +205,18 @@ class FUSB302():
     def interrupts(self):
         # return all interrupt registers
         return self.bus.readfrom_mem(self.addr, self.REG_INTERRUPTA, 2)+self.bus.readfrom_mem(self.addr, self.REG_INTERRUPT, 1)
+
+    def interrupt_a(self):
+        # return all interrupt registers
+        return self.bus.readfrom_mem(self.addr, self.REG_INTERRUPTA, 1)[0]
+
+    def interrupt_b(self):
+        # return all interrupt registers
+        return self.bus.readfrom_mem(self.addr, self.REG_INTERRUPTB, 1)[0]
+
+    def interrupt(self):
+        # return all interrupt registers
+        return self.bus.readfrom_mem(self.addr, self.REG_INTERRUPT, 1)[0]
 
     # interrupts are cleared just by reading them, it seems
     #def clear_interrupts(self):
