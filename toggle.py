@@ -10,6 +10,8 @@ from fusb302 import FUSB302
 #
 ########################
 
+# look into git history if you need this file annotated with lower-level code (i2c reads/writes)
+
 i2c = I2C(sda=Pin(18), scl=Pin(19), id=1, freq=400000)
 
 fusb = FUSB302(i2c, int_p=None)
@@ -23,16 +25,11 @@ fusb.reset()
 fusb.power()
 fusb.unmask_all()
 
-#ctrl0 = 0b00000100
-#ctrl2 = 0b00101011
-
-#fusb.bus.writeto_mem(fusb.addr, fusb.REG_CONTROL0, bytes((ctrl0,)) )
 fusb.set_controls_sink()
 
 # read before we start
 print(bin( fusb.interrupt_a() ))
 
-#fusb.bus.writeto_mem(fusb.addr, fusb.REG_CONTROL2, bytes((ctrl2,)) )
 fusb.set_toggle(True)
 
 def mask_all_except_toggle():
@@ -43,32 +40,19 @@ def mask_all_except_toggle():
 mask_all_except_toggle()
 
 while True:
-    #inta = fusb.bus.readfrom_mem(fusb.addr, fusb.REG_INTERRUPTA, 1)[0]
     inta = fusb.interrupt_a()
     if (inta >> 6 & 0b1):
         print("int triggered")
-        #print(bin( inta ))
-        # status1a = fusb.bus.readfrom_mem(fusb.addr, fusb.REG_STATUS1A, 1)[0]
-        # toggle_state = (status1a >> 3) & 0b111
-        #toggle_state = fusb.polarity()
-        # pol = polarity_values[toggle_state]
         pol = fusb.str_pol()
-        #print(bin(inta), bin( status1a ), pol)
         print(pol, fusb.polarity_names[pol[1]])
         if pol != (0, 0):
             print("pol found")
-            #print(bin( fusb.bus.readfrom_mem(fusb.addr, fusb.REG_INTERRUPTA, 1)[0] ))
-            #print(bin( fusb.bus.readfrom_mem(fusb.addr, fusb.REG_INTERRUPTB, 1)[0] ))
-            #print(bin( fusb.bus.readfrom_mem(fusb.addr, fusb.REG_INTERRUPT, 1)[0] ))
             print(list(map(bin, fusb.interrupts() )))
-            # disable toggle logic
-            #fusb.bus.writeto_mem(fusb.addr, fusb.REG_CONTROL2, bytes((0b00101010,)) )
+            # disable toggle logic to let it re-trigger, wait a little for uh idk what reason
             fusb.set_toggle(False)
-            # re-set the toggle
             sleep(0.1)
-            #fusb.bus.writeto_mem(fusb.addr, fusb.REG_CONTROL0, bytes((ctrl0,)) )
+            # re-set the toggle
             fusb.set_controls_sink()
-            #fusb.bus.writeto_mem(fusb.addr, fusb.REG_CONTROL2, bytes((ctrl2,)) )
             fusb.set_toggle(True)
             mask_all_except_toggle()
         else:
