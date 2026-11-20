@@ -13,8 +13,10 @@ from fusb302 import FUSB302
 # look into git history if you need this file annotated with lower-level code (i2c reads/writes)
 
 i2c = I2C(sda=Pin(18), scl=Pin(19), id=1, freq=400000)
+#import smbus
+#i2c = smbus.SMBus(1)
 
-fusb = FUSB302(i2c, int_p=None)
+fusb = FUSB302(i2c)
 
 def get_adc_vbus():
     return (3.3*11*a.read_u16())/65536
@@ -33,9 +35,9 @@ print(bin( fusb.interrupt_a() ))
 fusb.set_toggle(True)
 
 def mask_all_except_toggle():
-    fusb.bus.writeto_mem(fusb.addr, fusb.REG_MASK, bytes((0xfe,)) )
-    fusb.bus.writeto_mem(fusb.addr, fusb.REG_MASKA, bytes((0xbf,)) )
-    fusb.bus.writeto_mem(fusb.addr, fusb.REG_MASKB, bytes((0x01,)) )
+    fusb.i2c_write(fusb.REG_MASK, bytes((0xfe,)) )
+    fusb.i2c_write(fusb.REG_MASKA, bytes((0xbf,)) )
+    fusb.i2c_write(fusb.REG_MASKB, bytes((0x01,)) )
 
 mask_all_except_toggle()
 

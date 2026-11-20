@@ -40,15 +40,15 @@ class FUSB302():
         self.addr = addr
         self.int_p = int_p
 
-    def i2c_read(reg, amount=1):
+    def i2c_read(self, reg, amount=1):
         if self.is_linux_smbus:
             return self.bus.read_i2c_block_data(self.addr, reg, amount)
         else:
             return self.bus.readfrom_mem(self.addr, reg, amount)
 
-    def i2c_write(reg, data):
+    def i2c_write(self, reg, data):
         if self.is_linux_smbus:
-            return self.bus.write_i2c_block_data(self.addr, reg, buf)
+            return self.bus.write_i2c_block_data(self.addr, reg, list(data))
         else:
             return self.bus.writeto_mem(self.addr, reg, data)
 

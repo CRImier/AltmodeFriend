@@ -182,7 +182,7 @@ class PDStacc():
                         pass # new CRC, just a side effect of CC comms
                     if i_reg & 0x8: # I_ALERT
                         print("I_ALERT")
-                        x = self.fusb.bus.readfrom_mem(0x22, 0x41, 1)[0] # TODO export
+                        x = self.fusb.i2c_read(0x41, 1)[0] # TODO export
                         print(bin(x))
                     if i_reg & 0x4: # I_WAKE
                         print("I_WAKE")
