@@ -2,7 +2,6 @@ from machine import Pin, I2C, ADC
 from time import sleep
 
 from fusb302 import FUSB302
-from pdstacc import PDStacc
 
 ########################
 #
@@ -11,10 +10,7 @@ from pdstacc import PDStacc
 ########################
 
 i2c = I2C(sda=Pin(18), scl=Pin(19), id=1, freq=400000)
-#print(i2c.scan())
-#int_p = Pin(20, Pin.IN, Pin.PULL_UP)
 
-#fusb = FUSB302(i2c, int_p=int_p)
 fusb = FUSB302(i2c, int_p=None)
 
 def get_adc_vbus():
@@ -55,9 +51,9 @@ while True:
         # toggle_state = (status1a >> 3) & 0b111
         #toggle_state = fusb.polarity()
         # pol = polarity_values[toggle_state]
-        pol = fusb.print_pol()
+        pol = fusb.str_pol()
         #print(bin(inta), bin( status1a ), pol)
-        print(pol)
+        print(pol, fusb.polarity_names[pol[1]])
         if pol != (0, 0):
             print("pol found")
             #print(bin( fusb.bus.readfrom_mem(fusb.addr, fusb.REG_INTERRUPTA, 1)[0] ))
@@ -77,33 +73,3 @@ while True:
         else:
             print("other int", list(map(bin, fusb.interrupts() )))
     sleep(1)
-
-
-
-
-"""
-0b0 0b0
-0b0 0b0
-0b0 0b0
-0b1000000 0b1000
-0b0 0b1000
-0b0 0b1000
-0b0 0b1000
-0b0 0b1000
-0b0 0b1000
-0b0 0b1000
-"""
-"""
-    try:
-        print("setup_sink")
-        stacc.setup_sink()
-        print("flow_sink")
-        stacc.flow_sink()
-        # after flow_sink exits, setup_sink runs again
-        # this handles stack reset after unplug
-        # this would best work as an actual explicit state machine
-    except KeyboardInterrupt:
-        # lets you exit the loop on ctrlc
-        print("CtrlC again to exit")
-        sleep(1)
-"""
