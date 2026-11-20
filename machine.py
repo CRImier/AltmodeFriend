@@ -337,10 +337,10 @@ class I2C(Bus):
         #print("writeto_mem {} {} {}".format(hex(addr), hex(memaddr), str(buf)))
         if len(buf) == 1:
             if self.is_linux_smbus:
-                return _bus.write_byte_data(addr, memaddr, buf[0])
+                return self._bus.write_byte_data(addr, memaddr, buf[0])
         else:
             if self.is_linux_smbus:
-                return _bus.write_i2c_block_data(addr, memaddr, buf)
+                return self._bus.write_i2c_block_data(addr, memaddr, buf)
             #raise NotImplementedError('writeto_mem len(buf) > 1')
         raise NotImplementedError('writeto_mem')
 
