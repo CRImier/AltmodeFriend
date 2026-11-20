@@ -270,14 +270,22 @@ class FUSB302():
 
     polarity_values = (
       (0, 0),   # 000: logic still running
-      (1, 0),   # 001: cc1, src
-      (2, 0),   # 010: cc2, src
+      (1, 1),   # 001: cc1, src
+      (2, 1),   # 010: cc2, src
       (-1, -1), # 011: unknown
       (-1, -1), # 100: unknown
-      (1, 1),   # 101: cc1, snk
-      (2, 1),   # 110: cc2, snk
-      (0, 2),   # 111: audio accessory
+      (1, 2),   # 101: cc1, snk
+      (2, 2),   # 110: cc2, snk
+      (0, 3),   # 111: audio accessory
     )
+
+    polarity_names = {
+      -1: "unknown",
+       0:  "none",
+       1:  "source",
+       2:  "sink",
+       3:  "audio",
+    }
 
     current_values = (
         "Ra/low",
@@ -286,27 +294,28 @@ class FUSB302():
         "Rd-3.0"
     )
 
-    def set_toggle(self, state, mode=0b01, wake_en=0b1, rd_only=0b1, tg_pwrsave=0b00):
+    def set_toggle(self, state, mode=0b01, wake_en=0b1, rd_only=0b0, tg_pwrsave=0b00):
         #ctrl2 = self.bus.readfrom_mem(self.addr, self.REG_CONTROL2)[0]
-        #ctrl2 &= (~0b11101111)&0xff # clear all
-        ctrl2  = 0 # just clear all tbqh
-        if state:
-            ctrl2 |= bin(state) # enable
-            ctrl2 |= mode << 1 # default DRP mode
-            ctrl2 |= wake_en << 3 # enable
-            ctrl2 |= rd_only << 5 # enable
-            ctrl2 |= tg_pwrsave << 6 # enable
+        #ctrl2 &= (~0b11101111)&0xff # clear all except reserved
+        ctrl2 = 0 # actually, just clear all to start with
+        ctrl2 |= int(state) # TOGGLE bit
+        ctrl2 |= mode << 1 # MODE bits (default DRP mode)
+        ctrl2 |= wake_en << 3 # WAKE_EN bit, default on (enable Wake Detection functionality)
+        ctrl2 |= rd_only << 5 # TOG_RD_ONLY bit, default both Rd and Ra
+        ctrl2 |= tg_pwrsave << 6 # TOG_SAVE_PWR1/2 bits, default "don't go into DISABLE state" (no powersaving at all lol)
         self.bus.writeto_mem(self.addr, self.REG_CONTROL2, bytes((ctrl2,)) )
 
-    def print_pol(self):
-        return polarity_values[self.polarity()]
+    def str_pol(self):
+        pol = self.polarity()
+        val = self.polarity_values[pol]
+        return val
 
-    def print_int(self, a=None):
+    def str_int(self, a=None):
         if a is None:
             a = self.interrupts()
         return [bin(x) for x in a]
 
-    def print_cur(self):
+    def str_cur(self):
         return current_values[self.cc_current()]
 
     def send(self, message):
