@@ -5,7 +5,8 @@ from fusb302 import FUSB302
 
 ########################
 #
-# Hardware Stuff
+# Hardware Stuff (exclusively)
+# zero stack required for now
 #
 ########################
 
